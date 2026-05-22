@@ -1,0 +1,65 @@
+# ─── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ─── Jupyter ───────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ─── Virtual environments ──────────────────────────────────
+.venv/
+venv/
+env/
+
+# ─── MACE model weights (too large for git; use git-lfs or store separately) ──
+*.model
+*.pt
+*.pth
+
+# ─── ASE / simulation outputs ─────────────────────────────
+*.traj
+*.log
+*.out
+*.wfn
+*.wfn.bak-*
+*.RESTART
+RESTART/
+
+# ─── Training data / trajectory files ─────────────────────
+# Large XYZ pools are tracked by DVC or stored externally.
+# Commit configs and small example sets only.
+master_train_pool.xyz
+master_train_pool_*.xyz
+training_clean.xyz
+training_bad.xyz
+held_out.xyz
+al_selected_round*.xyz
+al_cp2k_results_round*.xyz
+training_data/
+geo_opt_results/
+
+# ─── CP2K job directories ──────────────────────────────────
+cp2k_sp_round*/
+cp2k_e0_round*/
+geometry_index_global.json
+
+# ─── Figures and plots ────────────────────────────────────
+comparison_results/
+*.png
+*.pdf
+
+# ─── Pipeline logs ─────────────────────────────────────────
+pipeline_*.log
+training_summary_*.log
+training_errors_*.log
+train_V*_*.log
+
+# ─── OS / editor junk ─────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
