@@ -60,7 +60,7 @@ AL_INPUT_DIR  = "geo_opt_results/al_candidates"
 
 # How many frames to send to CP2K per round (total across all systems)
 N_SELECT_TOTAL = 200
-MAX_CELL_VOLUME = 6000.0 # This is to prevent the data set becoming too large and wasting gpu
+MAX_ATOMS = 500.0 # This is to prevent the data set becoming too large and wasting gpu
 REUSE_EXISTING_CP2K = True # If true, skip writing inputs for frames that already have valid CP2K outputs (useful for iterative rounds)
 EXCLUDE_SYSTEM_KEYWORDS = ["DRY"] 
 
@@ -289,9 +289,10 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
 # ============================================================
 # Step 3 — CP2K single-point input generation
 # ============================================================
-LIBDIR = os.environ.get("CP2K_LIBDIR", "path/to/cp2klib")  # Set CP2K_LIBDIR env var or edit this
+LIBDIR = "/home/user/Documents/Models/CP2K/data"  # Set CP2K_LIBDIR env var or edit this
 if LIBDIR == "path/to/cp2klib":
     print(f"This job will fail as cp2k will not find CP2K Library for potentials")
+print(f"    BASIS_SET_FILE_NAME {LIBDIR}/BASIS_MOLOPT")
 
 CP2K_TEMPLATE = """\
 &GLOBAL
@@ -357,12 +358,14 @@ CP2K_TEMPLATE = """\
 {kinds}
   &END SUBSYS
   &PRINT
+    &STRESS_TENSOR
+    &END STRESS_TENSOR 
     &FORCES
     &END FORCES
   &END PRINT
+  STRESS_TENSOR ANALYTICAL 
 &END FORCE_EVAL
 """
-
 KIND_TEMPLATE = """\
     &KIND {symbol}
       BASIS_SET {basis}
@@ -370,9 +373,14 @@ KIND_TEMPLATE = """\
     &END KIND"""
 
 KIND_PARAMS = {
-    "Element":  ("DZVP-MOLOPT-SR-GTH",  "GTH-PBE"),
-    
+    "H":  ("DZVP-MOLOPT-SR-GTH-q1",  "GTH-PBE-q1"),
+    "C":  ("DZVP-MOLOPT-SR-GTH-q4",  "GTH-PBE-q4"),
+    "O":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
+    "F":  ("DZVP-MOLOPT-SR-GTH-q7",  "GTH-PBE-q7"),
+    "S":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
+    "Pt": ("DZVP-MOLOPT-SR-GTH-q18", "GTH-PBE-q18"),
 }
+
 if KIND_PARAMS == {    "Element":  ("DZVP-MOLOPT-SR-GTH",  "GTH-PBE")}:
     print(f" You did not define your Kinds in the active pipline file")
 
@@ -449,7 +457,8 @@ def write_cp2k_sp(atoms, name, outdir):
 
     inp = CP2K_TEMPLATE.format(
         name=name, a=a, b=b, c=c,
-        coords=coords.rstrip(), kinds=kinds
+        coords=coords.rstrip(), kinds=kinds,
+        LIBDIR=LIBDIR
     )
 
     inp_file = Path(outdir) / f"{name}.inp"
@@ -677,8 +686,53 @@ def write_all_sp_inputs(selected_frames, cp2k_dir):
 # Conversion constants
 HA_TO_EV    = Hartree        # Hartree → eV source https://physics.nist.gov/cgi-bin/cuu/Value?hrev
 BOHR_TO_ANG = Bohr       # Bohr → Å source https://conversion.org/length/bohr-atomic-unit-of-length/angstrom
-HA_BOHR_TO_EV_ANG = HA_TO_EV / BOHR_TO_ANG   # force unit conversion
+HA_BOHR_TO_EV_ANG = HA_TO_EV / BOHR_TO_ANG   # force unit conversion: Ha/Bohr → eV/Å
+# Note: stress is parsed from CP2K's GPa output, not Ha/Bohr³ — see parse_stress_from_out()
 
+
+def parse_stress_from_out(content):
+    """
+    Parse the stress tensor from a CP2K .out file.
+
+    CP2K prints the analytical stress tensor in GPa in this format:
+        STRESS| Analytical stress tensor [GPa]
+        STRESS|                        x                   y                   z
+        STRESS|      x       -4.26891679078E-05   1.75568524705E-07   1.76764385852E-07
+        STRESS|      y        1.75568524705E-07  -1.65688102407E-04  -8.88179362647E-09
+        STRESS|      z        1.76764385852E-07  -8.88179362647E-09  -1.67514479093E-05
+
+    Format notes:
+      - Lines prefixed with " STRESS| " (note the leading space)
+      - Row labels are lowercase x/y/z
+      - Values are E-notation, e.g. -4.26891679078E-05
+      - Subsequent STRESS| lines (Trace, Determinant, eigenvectors) use
+        integer row labels (1, 2, 3) so the [xyz] pattern safely skips them.
+
+    Returns a (3,3) numpy array in eV/Ang^3, or None if not found.
+    Stored as Voigt 6-vector [xx, yy, zz, yz, xz, xy] in atoms.info["REF_stress"].
+    """
+    # Unit conversion: 1 GPa = 1/160.21766208 eV/Ang^3
+    # 1 GPa = 1e9 J/m^3; 1 eV = 1.602176634e-19 J; 1 Ang = 1e-10 m
+    GPA_TO_EV_ANG3 = 1.0 / 160.21766208
+
+    # Match the three tensor body rows whose label is x, y, or z (lowercase).
+    # Eigenvector rows use integer labels (1,2,3) so [xyz] safely skips them.
+    row_pat = re.compile(
+        r"^ STRESS\|\s+([xyz])\s+([-\d.E+]+)\s+([-\d.E+]+)\s+([-\d.E+]+)",
+        re.MULTILINE
+    )
+
+    rows = {}
+    for m in row_pat.finditer(content):
+        label = m.group(1)
+        if label not in rows:    # keep only first occurrence of each row label
+            rows[label] = [float(m.group(2)), float(m.group(3)), float(m.group(4))]
+
+    if len(rows) != 3:
+        return None
+
+    stress_gpa = np.array([rows["x"], rows["y"], rows["z"]])  # (3,3) GPa
+    return stress_gpa * GPA_TO_EV_ANG3                        # eV/Ang^3
 
 def parse_cp2k_sp_results(cp2k_dir, selected_frames):
     """
@@ -755,6 +809,16 @@ def parse_cp2k_sp_results(cp2k_dir, selected_frames):
         atoms.info["REF_energy"] = energy_eV
         atoms.info["al_round"]   = ROUND
         atoms.info["source"]     = "cp2k_sp"
+
+        # --- Stress ---
+        stress = parse_stress_from_out(content)
+        if stress is not None:
+            # Store full 3x3 tensor; MACE training reads REF_stress as Voigt 6-vector.
+            # Voigt order: [xx, yy, zz, yz, xz, xy]
+            voigt = stress[[0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]]
+            atoms.info["REF_stress"] = voigt
+        else:
+            print(f"  [~] No stress tensor found in {name}.out — stress will be absent")
 
         # Remove live calculator so extxyz writes cleanly
         atoms.calc = None
@@ -865,6 +929,7 @@ def is_physically_reasonable(atoms, calc, round_num=1):
     # If SLAB_ELEMENT is set in atoms.info, check non-slab atoms aren't buried.
     # This is a generalised version: set atoms.info["slab_element"] = "Pt" (or any element)
     # and atoms.info["slab_z_threshold"] = 5.0 to activate.
+    symbols = np.array(atoms.get_chemical_symbols())
     slab_element = atoms.info.get("slab_element", None)
     z_threshold  = float(atoms.info.get("slab_z_threshold", 5.0))
     if slab_element:
@@ -1173,7 +1238,13 @@ def reparse_failed():
         atoms.info["al_round"]   = ROUND
         atoms.info["source"]     = "cp2k_sp"
         atoms.calc = None
- 
+        
+        # --- Stress ---
+        stress = parse_stress_from_out(content)
+        if stress is not None:
+            voigt = stress[[0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]]
+            atoms.info["REF_stress"] = voigt
+            
         if not forces_ok:
             atoms.info["forces_missing"] = True
             print(f"  [~] Recovered {name} (energy only)")
@@ -1340,7 +1411,8 @@ def parse_all_cp2k_outputs():
 
     try: 
         with open(E0_JSON, "r") as file:
-            E0s_ref = json.load(file)
+            E0s_ref = {int(k): v for k, v in json.load(file).items()}
+            print(f"Your E0s are {E0s_ref}")
     except FileNotFoundError:
         print(f"Error: The file '{E0_JSON}' could not be found.")
         E0s_ref = {}  # Provide a fallback empty dictionary so the rest of the script doesn't break
@@ -1405,11 +1477,11 @@ def parse_all_cp2k_outputs():
                 continue
                         
             #Check the cell isnt too big for memory
-            volume = MAX_CELL_VOLUME
-            cell_vol = atoms.get_volume()
-            if cell_vol > volume:
-                print(f"  [!] {out_path.name}: cell volume={cell_vol:.1f} Å³ "
-                    f"(limit {volume}) — skipping")
+            # Adjust MAX_ATOMS at the top of this file.
+            n_atoms = len(atoms)
+            if n_atoms > MAX_ATOMS:
+                print(f"  [!] {out_path.name}: {n_atoms} atoms exceeds limit "
+                      f"({MAX_ATOMS}) — skipping")
                 parse_failed += 1
                 continue
             # --------------------------------------------------------
@@ -1436,7 +1508,7 @@ def parse_all_cp2k_outputs():
             if pt_count > 3:                                         # Pt slab
                 res_lo, res_hi = -8.0, -1.0
             elif pt_count > 0:                                       # dissolved Pt
-                res_lo, res_hi = -8.0, -1.0
+                res_lo, res_hi = -8.0, -0.0
             elif any(s in symbols_set for s in ("F", "S", "C")):    # Nafion
                 res_lo, res_hi = -6.0, -1.0
             elif symbols_set <= {"H", "O"}:                         # bulk water
@@ -1478,10 +1550,19 @@ def parse_all_cp2k_outputs():
             atoms.info["REF_energy"] = energy_eV
             atoms.info["al_round"]   = round_num
             atoms.info["source"]     = "cp2k_sp"
+            
+            # --- Stress ---
+            stress = parse_stress_from_out(out_content)
+            if stress is not None:
+                voigt = stress[[0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]]
+                atoms.info["REF_stress"] = voigt
+            else:
+                atoms.info["stress_missing"] = True
+
             if not forces_ok:
                 atoms.info["forces_missing"] = True
             atoms.calc = None
-
+            
             # Accept
             new_frames.append(atoms)
             pool_hashes.add(geom_hash)
@@ -1520,7 +1601,7 @@ def parse_all_cp2k_outputs():
     print(f"  Already in pool         : {already_have}")
     print(f"  Parse failures / bad    : {parse_failed}")
     print(f"  Written to              : {POOL_FILE}")
-    print(f"  Volume MAX              : {MAX_CELL_VOLUME}")
+    print(f"  Max atoms allowed       : {MAX_ATOMS}")
 
     if not new_frames:
         print("\n[✓] Pool is already up to date — nothing to add.")
