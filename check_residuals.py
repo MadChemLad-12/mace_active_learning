@@ -18,7 +18,8 @@ NON_PT_THRESH = 5.3
 E0_JSON = "E0s.json"
 try:
     with open(E0_JSON, "r") as file:
-        E0s_ref = json.load(file)
+        E0s_ref = {int(k): v for k, v in json.load(file).items()}
+        print(f"Your E0s are {E0s_ref}")
 
 except FileNotFoundError:
     # Fix 1: Handle a missing file
@@ -132,7 +133,7 @@ for index, atoms in enumerate(unique_frames):
     if   "Pt" in symbols_set and pt_count > 3:          # Pt slab
         coh_lo, coh_hi = -8.0, -3.0
     elif "Pt" in symbols_set and pt_count <= 3:          # dissolved Pt
-        coh_lo, coh_hi = -8.0, -1.0
+        coh_lo, coh_hi = -8.0, -0.0
     elif any(s in symbols_set for s in ("F", "S", "C")): # Nafion-containing
         coh_lo, coh_hi = -8.0, -1.0
     elif symbols_set <= {"H", "O"}:                      # bulk water
