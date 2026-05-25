@@ -147,6 +147,7 @@ NUM_SAMPLES_PT=900   # Materials Project frames to mix in during multi-head trai
 
 # Elements present across ALL your systems (atomic numbers)
 # H=1, C=6, O=8, F=9, S=16, Pt=78
+# Change to your E0_Values
 ATOMIC_NUMBERS="[1, 6, 8, 9, 16, 78]"
 E0_VALUES="{
 1: -12.6294, 
@@ -183,7 +184,6 @@ SUMMARY_LOG="training_summary_${timestamp}.log"
 ERROR_LOG="training_errors_${timestamp}.log"
 EVAL_OUTPUT="results_V${ROUND}_${timestamp}.xyz"
 PLOT_PREFIX="plot_V${ROUND}_${timestamp}"
-
 
 # =============================================================================
 # STEP 1 — Pre-flight checks

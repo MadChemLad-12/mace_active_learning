@@ -289,10 +289,9 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
 # ============================================================
 # Step 3 — CP2K single-point input generation
 # ============================================================
-LIBDIR = "/home/user/Documents/Models/CP2K/data"  # Set CP2K_LIBDIR env var or edit this
+LIBDIR = "path/to/cp2klib"  # Set CP2K_LIBDIR env var or edit this
 if LIBDIR == "path/to/cp2klib":
     print(f"This job will fail as cp2k will not find CP2K Library for potentials")
-print(f"    BASIS_SET_FILE_NAME {LIBDIR}/BASIS_MOLOPT")
 
 CP2K_TEMPLATE = """\
 &GLOBAL

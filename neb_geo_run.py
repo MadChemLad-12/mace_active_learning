@@ -68,7 +68,7 @@ PATH_CSV        = "configs.csv"
 
 # Geometry optimisation settings
 FMAX            = 0.05     # Force convergence threshold (eV/Å)
-MAX_STEPS       = 500      # Max optimisation steps per structure
+MAX_STEPS       = 800      # Max optimisation steps per structure
 OPTIMIZER       = "FIRE"   # "BFGS" (smooth surfaces) or "FIRE" (robust, any surface)
 SKIP_OPTIMISATION = False   # Set to True to skip geometry optimisation
 
@@ -126,7 +126,6 @@ PLUMED_KAPPA      = 500.0    # Wall stiffness (kJ/mol)
 # One file per system, named:  mace_geoopt_{name}.extxyz  (geo-opt frames)
 #                              mace_neb_{name}.extxyz      (NEB frames)
 AL_EXPORT_DIR = "al_candidates"  # sub-directory inside OUTPUT_DIR
-AL_EXPORT_DIR = os.path.join(OUTPUT_DIR, "al_candidates")
 
 # ==============================================================================
 # CONFIGURATIONS — loaded from CSV

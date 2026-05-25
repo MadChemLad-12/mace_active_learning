@@ -1,7 +1,8 @@
 #!/usr/bin/bash
 
 #Define base path at top
-export MACE_PATH=""
+#Change to your path
+export MACE_PATH="/home/user/Documents/Programs/For_GIT/MACE_CP2K_pipeline/"
 
 big_gap() {
     echo -e "\n\n\n\n"
@@ -107,12 +108,12 @@ run_training_round() {
 
 #ONCE THE CURRENT RUN IS DONE. WE DO IT AGAIN
 # Run one instance
-R=2
-EXCLUDE_KEYWORDS="DRY WET Dry0"   # set to "" to disable
-GEO_OPT_RUN="False"   
+R=1
+EXCLUDE_KEYWORDS=""   # set to "" to disable
+GEO_OPT_RUN="True"   
 SKIP_OPT="True"
-SKIP_NEB="True"
-SKIP_PLM="True" ### Plumed isnt really what I was looking for?
+SKIP_NEB="False"
+SKIP_PLM="False" ### Plumed isnt really what I was looking for?
         
 PIPELINE_RUN="False"
 DISSOLVED="False"
@@ -120,7 +121,7 @@ DISSOLVED="False"
 TRAINING_PATH="training_clean.xyz"
 FOUNDATION="${MACE_PATH}mace-mp-0b3-medium-float32.model"
 
-CP2K_RUN="False"
+CP2K_RUN="True"
 RUNS="50"
 COMPARE_MODELS="True"
 
