@@ -105,6 +105,7 @@ mace_active_learning/
 ├── plotloss.py                 # Training loss/RMSE curves from log file
 ├── pool_coverage.py            # Candidate pool coverage diagnostic
 ├── check_gpu_memory.py         # GPU memory profiling utility
+├── check_neb_index.py          # To make sure the neb pathways are logical
 │
 ├── configs.csv                 # YOUR SYSTEM DEFINITIONS — edit this
 ├── E0s.json                    # Isolated-atom DFT reference energies (eV)
@@ -497,6 +498,15 @@ Profiles GPU memory usage by running MACE on structures sorted by cell volume. R
 
 ```bash
 python check_gpu_memory.py
+```
+
+### `check_neb_index.py`
+
+Checks the index and element of the initial and final scrictures from the csv file.
+This is to check before running neb_geo_run.py
+
+```bash
+python check_neb_index.py
 ```
 
 ### `pool_coverage.py`

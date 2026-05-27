@@ -120,6 +120,42 @@ PLUMED_CN_LOW     = 6.5      # Lower harmonic wall on CN (surface-like)
 PLUMED_CN_HIGH    = 9.5      # Upper harmonic wall on CN (bulk-metal-like)
 PLUMED_KAPPA      = 500.0    # Wall stiffness (kJ/mol)
 
+# ==============================================================================
+# AIMD settings
+# ==============================================================================
+# AIMD runs unbiased NVT molecular dynamics with MACE as the force engine.
+# Unlike PLUMED (which constrains the CV to stay near the surface state),
+# AIMD explores the full thermal energy surface freely.  This is useful for:
+#   - Sampling near-transition-state structures that NEB interpolation misses
+#   - Finding thermally-accessible configurations not reachable by geo-opt
+#   - Building a diverse pool of solvation-shell rearrangements
+#
+# WHEN TO USE:
+#   SKIP_AIMD = True   (default) — skip until round 3+ when the potential
+#                      is reliable enough not to produce garbage trajectories.
+#   SKIP_AIMD = False  — enable via --run-aimd flag.
+#                        Run on INITIAL structures only (same as PLUMED).
+#
+# AIMD vs PLUMED:
+#   PLUMED = biased, stays near surface state, cheap CV-guided sampling.
+#   AIMD   = unbiased, free thermal exploration, finds what PLUMED walls hide.
+#   Use both together from round 3+ for maximum diversity.
+#
+# TARGET SELECTION:
+#   AIMD_TARGET = "initial"  — sample near the adsorbed/surface state.
+#   AIMD_TARGET = "final"    — sample near the vacancy/dissolved state.
+#   AIMD_TARGET = "both"     — run AIMD on both endpoints per config.
+# ==============================================================================
+
+SKIP_AIMD        = True
+AIMD_STEPS       = 2000         # Total MD steps
+AIMD_TEMP        = 600          # Target temperature in K (higher → more diverse)
+AIMD_DT          = 1.0          # Timestep in fs (1.0 fs safe for most systems)
+AIMD_FRICTION    = 0.01         # Langevin friction coefficient (fs⁻¹)
+AIMD_STRIDE      = 20           # Save a frame every N steps
+AIMD_TARGET      = "initial"    # "initial", "final", or "both"
+AIMD_WARMUP      = 200          # Steps at low T before production (prevents explosion)
+AIMD_WARMUP_TEMP = 100          # Warmup temperature in K
 
 # Active learning export settings
 # The active_pipeline.py will look for these files.
@@ -372,59 +408,86 @@ def print_progress_bar(current, total, config_name):
 # NEB WORKFLOW  (fixed image-list construction + AL export)
 # ==============================================================================
 
-def neb_workflow(init_atoms, final_atoms, calc, name):
+def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=False):
     """
     Run CI-NEB between init_atoms and final_atoms using MACE.
+
+    Parameters
+    ----------
+    use_proximity_mapping : bool
+        If False (default), atoms are matched by index and element symbol —
+        i.e. atom[i] in init must equal atom[i] in final.
+        If True, uses map_atoms_by_proximity() to reorder final to best match
+        init by spatial distance (original behaviour).
+
     Saves:
-      - {OUTPUT_DIR}/{name}_neb.traj          (ASE trajectory)
-      - {OUTPUT_DIR}/{name}_neb.extxyz        (all images, for visualisation)
+      - {OUTPUT_DIR}/{name}_neb.traj
+      - {OUTPUT_DIR}/{name}_neb.extxyz
       - {OUTPUT_DIR}/{AL_EXPORT_DIR}/mace_neb_{name}.extxyz
-            (tagged for active_pipeline.py: system_type + neb_image set)
     """
     print(f"\n[→] Starting NEB for: {name}")
 
-    # ---- FIX: correct image list construction ----
-    # Previously:  [init.copy() for _ in range(N_IMAGES + 1) + [final.copy()]]
-    # This crashed because you can't add a list to range() in Python 3.
-    
+    # ── 1. Basic sanity checks ────────────────────────────────────────────────
     if len(init_atoms) != len(final_atoms):
-        print(f"  [✗] ERROR: Initial and final structures have different number of atoms.")
-        print(f"      Init: {len(init_atoms)} atoms, Final: {len(final_atoms)} atoms")
+        print(f"  [✗] ERROR: atom count mismatch — "
+              f"init {len(init_atoms)}, final {len(final_atoms)}")
         return []
-    elif init_atoms.get_chemical_symbols() != final_atoms.get_chemical_symbols():
-        print(f"  [✗] ERROR: Initial and final structures have different chemical compositions.")
-        print(f"      Init: {init_atoms.get_chemical_symbols()}")
-        print(f"      Final: {final_atoms.get_chemical_symbols()}")
-        return []
+
+    # ── 2. Atom matching ──────────────────────────────────────────────────────
+    if use_proximity_mapping:
+        # --- Legacy / optional: reorder final by nearest-neighbour proximity ---
+        print(f"  [→] Using proximity-based atom mapping...")
+        try:
+            final_atoms = map_atoms_by_proximity(init_atoms, final_atoms)
+            print(f"  [✓] Proximity mapping successful."
+                  f"  [!] Make sure to check the output of use_proximity_mapping")
+        except Exception as e:
+            print(f"  [✗] Proximity mapping failed: {e}")
+            return []
+
     else:
-        for i, (s1, s2) in enumerate(zip(init_atoms.get_chemical_symbols(), final_atoms.get_chemical_symbols())):
-            if s1 != s2:
-                print(f"Index {i} is {s1} in initial but {s2} in final!")
-                break
-    
-    
-    try:
-        final_atoms = map_atoms_by_proximity(init_atoms, final_atoms)
-        print(f"  [✓] Atom mapping successful: final structure reordered to match initial.")
-    except Exception as e:
-        print(f"[✗] Mapping failed: {e}")
-        
-    if check_mapping_consistency(init_atoms,final_atoms):
-        print(f"  [✓] Initial and final structures are consistent within {MAX_Threshold} Å with {MAX_WARNINGS} warnings.")
+        # --- Default: index-and-element check (no reordering) ---
+        print(f"  [→] Checking atom indices and elements match directly...")
+        init_syms  = init_atoms.get_chemical_symbols()
+        final_syms = final_atoms.get_chemical_symbols()
+
+        mismatches = [
+            (i, s1, s2)
+            for i, (s1, s2) in enumerate(zip(init_syms, final_syms))
+            if s1 != s2
+        ]
+
+        if mismatches:
+            print(f"  [✗] ERROR: Element mismatch at {len(mismatches)} index(es):")
+            for i, s1, s2 in mismatches[:5]:
+                print(f"      Index {i}: init={s1}, final={s2}")
+            if len(mismatches) > 5:
+                print(f"      ... and {len(mismatches) - 5} more.")
+            print(f"  [!] Tip: set use_proximity_mapping=True to auto-reorder."
+                  f"  [!] Make sure to check the output of use_proximity_mapping")
+            return []
+
+        print(f"  [✓] All {len(init_syms)} atom indices and elements match.")
+
+    # ── 3. Consistency check (shared by both paths) ───────────────────────────
+    if check_mapping_consistency(init_atoms, final_atoms):
+        print(f"  [✓] Structures consistent within {MAX_Threshold} Å "
+              f"({MAX_WARNINGS} warning threshold).")
     else:
-        print(f"  [!] WARNING: Initial and final structures show significant mismatch.")
-        print(f"      This may lead to NEB failure or unphysical paths.")
-        print(f"      Consider checking the structures visually or adjusting the mapping threshold.")
-        
-     
+        print(f"  [!] WARNING: Significant structural mismatch detected.")
+        print(f"      NEB may fail or produce unphysical paths.")
+        print(f"      Consider visualising both endpoints before continuing.")
+    
+    # ── 4. Build image list ─────────────────────────────────────────────────── 
     images = [init_atoms.copy()]
     for _ in range(N_IMAGES):
         images.append(init_atoms.copy())
     images.append(final_atoms.copy())
-    # -----------------------------------------------
+
     for image in images:
         image.calc = calc
-    
+        
+    # ── 5. Interpolate and constrain ─────────────────────────────────────────
     neb = NEB(images, climb=CLIMB, allow_shared_calculator=True)
     neb.interpolate(apply_constraint=False)  # Don't apply constraints to interpolated images
 
@@ -433,7 +496,7 @@ def neb_workflow(init_atoms, final_atoms, calc, name):
         for image in images:  
             image.set_constraint(FixAtoms(indices=fixed_indices))
 
-
+    # ── 6. Optimise ───────────────────────────────────────────────────────────
     neb_traj_path = os.path.join(OUTPUT_DIR, f"{name}_neb.traj")
     neb_log_path  = os.path.join(OUTPUT_DIR, f"{name}_neb.log")
 
@@ -449,7 +512,7 @@ def neb_workflow(init_atoms, final_atoms, calc, name):
     except Exception as e:
         print(f"[✗] NEB failed for {name}: {e}")
 
-    # ---- Tag every image with metadata before export ----
+    # ── 7. Tag and export ─────────────────────────────────────────────────────
     for idx, img in enumerate(images):
         img.info["system_type"] = name
         img.info["neb_image"]   = idx
@@ -465,7 +528,6 @@ def neb_workflow(init_atoms, final_atoms, calc, name):
     print(f"[✓] NEB frames exported for AL: {al_path}")
 
     return images
-
 
 # ==============================================================================
 # GEO-OPT AL EXPORT HELPER
@@ -685,6 +747,128 @@ def plumed_sampling(atoms, calc, name,
     return sampled_frames
 
 # ==============================================================================
+# AIMD WORKFLOW  (unbiased NVT thermal sampling with MACE)
+# ==============================================================================
+
+def aimd_sampling(atoms, calc, name, n_steps=None, timestep=None):
+    """
+    Run unbiased NVT Langevin MD with MACE to thermally sample the local
+    energy surface around a given structure.
+
+    Unlike plumed_sampling(), there is no CV bias — the simulation is free
+    to explore anywhere.  A short warmup phase ramps the temperature from
+    AIMD_WARMUP_TEMP to AIMD_TEMP to prevent geometry explosions from
+    high-force starting configurations.
+
+    Saves:
+      - {OUTPUT_DIR}/{name}_aimd.extxyz        (all sampled frames)
+      - {OUTPUT_DIR}/{AL_EXPORT_DIR}/mace_aimd_{name}.extxyz
+            (tagged for active_pipeline.py)
+
+    Returns a list of ASE Atoms objects (the saved frames), or [] on failure.
+    """
+    from ase.md.langevin import Langevin
+    from ase.md.velocitydistribution import MaxwellBoltzmannDistribution, Stationary
+    from ase import units
+
+    if n_steps  is None: n_steps  = AIMD_STEPS
+    if timestep is None: timestep = AIMD_DT
+
+    total_time_ps = n_steps * timestep / 1000.0
+    n_frames      = n_steps // AIMD_STRIDE
+    print(f"\n[→] Starting AIMD for: {name}")
+    print(f"    {n_steps} steps × {timestep} fs = {total_time_ps:.2f} ps "
+          f"| T = {AIMD_TEMP} K | ~{n_frames} frames")
+
+    sampling_atoms = atoms.copy()
+    sampling_atoms.calc = calc
+
+    # Apply the same bottom-layer constraint as geo-opt and PLUMED
+    fixed_indices = get_fixed_indices(sampling_atoms)
+    if fixed_indices:
+        sampling_atoms.set_constraint(FixAtoms(indices=fixed_indices))
+
+    # ── Warmup phase ─────────────────────────────────────────────────────────
+    # Initialise velocities at a low temperature first.  This lets the
+    # structure relax its internal stress before the full temperature hits.
+    # Without this, high-force starting geometries can blow up in the first
+    # few steps and produce unphysical frames.
+    print(f"  [→] Warmup: {AIMD_WARMUP} steps at {AIMD_WARMUP_TEMP} K...")
+    MaxwellBoltzmannDistribution(sampling_atoms,
+                                  temperature_K=AIMD_WARMUP_TEMP,
+                                  rng=np.random.default_rng(42))
+    Stationary(sampling_atoms)  # zero net momentum
+
+    warmup_dyn = Langevin(
+        sampling_atoms,
+        timestep=timestep * units.fs,
+        temperature_K=AIMD_WARMUP_TEMP,
+        friction=AIMD_FRICTION,
+    )
+    try:
+        warmup_dyn.run(AIMD_WARMUP)
+        print(f"  [✓] Warmup complete.")
+    except Exception as e:
+        print(f"  [✗] Warmup failed for {name}: {e}")
+        return []
+
+    # ── Production phase ──────────────────────────────────────────────────────
+    print(f"  [→] Production: {n_steps} steps at {AIMD_TEMP} K...")
+
+    # Re-initialise velocities at production temperature
+    MaxwellBoltzmannDistribution(sampling_atoms,
+                                  temperature_K=AIMD_TEMP,
+                                  rng=np.random.default_rng(123))
+    Stationary(sampling_atoms)
+
+    prod_dyn = Langevin(
+        sampling_atoms,
+        timestep=timestep * units.fs,
+        temperature_K=AIMD_TEMP,
+        friction=AIMD_FRICTION,
+    )
+
+    sampled_frames = []
+
+    def _save_frame():
+        at = sampling_atoms.copy()
+        at.calc = None
+        at.info["system_type"]   = name
+        at.info["source"]        = "mace_aimd"
+        at.info["aimd_step"]     = prod_dyn.get_number_of_steps()
+        at.info["aimd_temp_K"]   = AIMD_TEMP
+        at.info["aimd_dt_fs"]    = timestep
+        sampled_frames.append(at)
+
+    prod_dyn.attach(_save_frame, interval=AIMD_STRIDE)
+
+    try:
+        t0 = time.perf_counter()
+        prod_dyn.run(n_steps)
+        elapsed = time.perf_counter() - t0
+        print(f"  [✓] AIMD completed for {name} in {elapsed:.2f} s "
+              f"| {len(sampled_frames)} frames collected")
+    except Exception as e:
+        print(f"  [✗] AIMD production failed for {name}: {e}")
+        if not sampled_frames:
+            return []
+        print(f"  [~] Saving {len(sampled_frames)} frames collected before failure")
+
+    if not sampled_frames:
+        print(f"  [!] No frames collected for {name} — skipping export")
+        return []
+
+    # ── Export ────────────────────────────────────────────────────────────────
+    traj_out = os.path.join(OUTPUT_DIR, f"{name}_aimd.extxyz")
+    write(traj_out, sampled_frames, format="extxyz")
+
+    al_path = os.path.join(OUTPUT_DIR, AL_EXPORT_DIR, f"mace_aimd_{name}.extxyz")
+    write(al_path, sampled_frames, format="extxyz")
+    print(f"  [✓] AIMD frames exported for AL: {al_path}")
+
+    return sampled_frames
+
+# ==============================================================================
 # MAIN WORKFLOW
 # ==============================================================================
 
@@ -706,6 +890,13 @@ def main():
                         help="Skip neb sampling")
     parser.add_argument("--run-plumed",  action="store_true",
                         help="Alias for --skip-plumed=False, enable PLUMED")
+    parser.add_argument("--run-aimd",    action="store_true",
+                        help="Enable unbiased MACE NVT AIMD sampling (default OFF until round 3)")
+    parser.add_argument("--skip-aimd",   action="store_true",
+                        help="Force-disable AIMD even if round >= 3")
+    parser.add_argument("--aimd-target", type=str, default=None,
+                        choices=["initial", "final", "both"],
+                        help="Which endpoint(s) to run AIMD on (default: initial)")
     args = parser.parse_args()
     
     if args.run_plumed:
@@ -722,6 +913,17 @@ def main():
         SKIP_NEB = True
     else:
         SKIP_NEB = (args.round <= 1)
+
+    # AIMD: off by default, enabled from round 3+ or with --run-aimd
+    if args.run_aimd:
+        SKIP_AIMD = False
+    elif args.skip_aimd:
+        SKIP_AIMD = True
+    else:
+        SKIP_AIMD = (args.round <= 2)
+
+    if args.aimd_target is not None:
+        AIMD_TARGET = args.aimd_target
     
     if args.model:
         MACE_MODEL_PATH = args.model
@@ -755,6 +957,8 @@ def main():
             "final_file":   final_path,
             "neb_run":      False,
             "plumed_run": False,
+            "aimd_run":   False,
+            "aimd_frames": 0,
         }
 
         # --- Optimise both endpoints ---
@@ -854,8 +1058,34 @@ def main():
             print(f"  [→] Skipping PLUMED sampling for {name} (SKIP_PLUMED=True)")
             print(f"      Try in later rounds once the model is more reliable.")
             
-            
-        # --- Reaction energy ---
+        # --- AIMD unbiased thermal sampling ---
+        # Runs free NVT Langevin MD with MACE — no CV bias, no walls.
+        # Explores the thermal energy surface around the chosen endpoint(s).
+        # AIMD_TARGET controls which endpoint(s) are sampled.
+        if not SKIP_AIMD:
+            aimd_targets = []
+            if AIMD_TARGET in ("initial", "both") and init_for_neb is not None:
+                aimd_targets.append(("initial", init_for_neb))
+            if AIMD_TARGET in ("final", "both") and final_for_neb is not None:
+                aimd_targets.append(("final", final_for_neb))
+
+            if not aimd_targets:
+                print(f"  [!] Skipping AIMD for {name}: no valid endpoint(s) available.")
+            else:
+                total_aimd_frames = 0
+                for endpoint_label, endpoint_atoms in aimd_targets:
+                    aimd_name = f"{name}_{endpoint_label}"
+                    print(f"  [→] Running AIMD on {endpoint_label} structure of {name}...")
+                    aimd_frames = aimd_sampling(endpoint_atoms, calc, aimd_name)
+                    total_aimd_frames += len(aimd_frames)
+                config_result["aimd_run"]    = total_aimd_frames > 0
+                config_result["aimd_frames"] = total_aimd_frames
+        else:
+            print(f"  [→] Skipping AIMD for {name} (SKIP_AIMD=True)")
+            print(f"      Enable from round 3+ with --run-aimd.")
+            config_result["aimd_run"]    = False
+            config_result["aimd_frames"] = 0
+
         if ("initial_energy_eV" in config_result
                 and "final_energy_eV" in config_result):
             delta_e = (config_result["final_energy_eV"]
@@ -888,24 +1118,23 @@ def main():
         init_s  = r.get("initial_status", "?")
         final_s = r.get("final_status",   "?")
         delta_e = r.get("reaction_energy_eV", None)
-        delta_str = f"{delta_e:+.4f}" if delta_e is not None else "N/A"
-        neb_done   = "✓" if r.get("neb_run")    else "–"
+        delta_str  = f"{delta_e:+.4f}" if delta_e is not None else "N/A"
+        neb_done    = "✓" if r.get("neb_run")    else "–"
         plumed_done = "✓" if r.get("plumed_run") else "–"
-    
+        aimd_done   = f"✓ ({r.get('aimd_frames', 0)}f)" if r.get("aimd_run") else "–"
 
         has_error = ("FILE NOT FOUND" in init_s or "FAILED" in init_s or
                      "FILE NOT FOUND" in final_s or "FAILED" in final_s)
 
         if has_error:
             print(f"{name:<20} {init_s:<25} {final_s:<25} "
-                  f"{'N/A':<12} {neb_done:<6} {plumed_done}  ✗ ERROR")
+                  f"{'N/A':<12} {neb_done:<6} {plumed_done:<8} {aimd_done}  ✗ ERROR")
             needs_attention.append(name)
             continue
 
-
         both_stable = ("STABLE" in init_s and "STABLE" in final_s)
         neb_ready   = "✓ YES" if both_stable else "~ CHECK"
-        print(f"{name:<20} {init_s:<25} {final_s:<25} {delta_str:<12} {neb_done:<6} {plumed_done}")
+        print(f"{name:<20} {init_s:<25} {final_s:<25} {delta_str:<12} {neb_done:<6} {plumed_done:<8} {aimd_done}")
 
         if both_stable:
             ready_for_neb.append(name)
