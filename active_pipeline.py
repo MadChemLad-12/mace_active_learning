@@ -685,53 +685,302 @@ def write_all_sp_inputs(selected_frames, cp2k_dir):
 # Conversion constants
 HA_TO_EV    = Hartree        # Hartree → eV source https://physics.nist.gov/cgi-bin/cuu/Value?hrev
 BOHR_TO_ANG = Bohr       # Bohr → Å source https://conversion.org/length/bohr-atomic-unit-of-length/angstrom
-HA_BOHR_TO_EV_ANG = HA_TO_EV / BOHR_TO_ANG   # force unit conversion: Ha/Bohr → eV/Å
-# Note: stress is parsed from CP2K's GPa output, not Ha/Bohr³ — see parse_stress_from_out()
-
+HA_BOHR_TO_EV_ANG = HA_TO_EV / BOHR_TO_ANG   # force unit conversion
+HA_BOHR3_TO_EV_ANG3 = HA_TO_EV / (BOHR_TO_ANG ** 3) 
 
 def parse_stress_from_out(content):
     """
     Parse the stress tensor from a CP2K .out file.
 
-    CP2K prints the analytical stress tensor in GPa in this format:
+    CP2K prints the stress tensor in a block like:
         STRESS| Analytical stress tensor [GPa]
-        STRESS|                        x                   y                   z
-        STRESS|      x       -4.26891679078E-05   1.75568524705E-07   1.76764385852E-07
-        STRESS|      y        1.75568524705E-07  -1.65688102407E-04  -8.88179362647E-09
-        STRESS|      z        1.76764385852E-07  -8.88179362647E-09  -1.67514479093E-05
+        STRESS|                    X                   Y                   Z
+        STRESS| X         -1.234567890         0.000000000         0.000000000
+        STRESS| Y          0.000000000        -1.234567890         0.000000000
+        STRESS| Z          0.000000000         0.000000000        -1.234567890
 
-    Format notes:
-      - Lines prefixed with " STRESS| " (note the leading space)
-      - Row labels are lowercase x/y/z
-      - Values are E-notation, e.g. -4.26891679078E-05
-      - Subsequent STRESS| lines (Trace, Determinant, eigenvectors) use
-        integer row labels (1, 2, 3) so the [xyz] pattern safely skips them.
+    Note: CP2K reports stress in GPa in the log, but the raw internal value used
+    for training is in Ha/Bohr³. We parse the Ha/Bohr³ block instead so we can
+    apply our own unit conversion to eV/Å³.
 
-    Returns a (3,3) numpy array in eV/Ang^3, or None if not found.
-    Stored as Voigt 6-vector [xx, yy, zz, yz, xz, xy] in atoms.info["REF_stress"].
+    Returns a (3, 3) numpy array in eV/Å³, or None if the block is not found.
+    The matrix is symmetric; MACE training uses the Voigt 6-component form
+    [xx, yy, zz, yz, xz, xy] which you can get with:
+        voigt = stress_matrix[[0,1,2,1,0,0], [0,1,2,2,2,1]]
     """
-    # Unit conversion: 1 GPa = 1/160.21766208 eV/Ang^3
-    # 1 GPa = 1e9 J/m^3; 1 eV = 1.602176634e-19 J; 1 Ang = 1e-10 m
-    GPA_TO_EV_ANG3 = 1.0 / 160.21766208
-
-    # Match the three tensor body rows whose label is x, y, or z (lowercase).
-    # Eigenvector rows use integer labels (1,2,3) so [xyz] safely skips them.
-    row_pat = re.compile(
-        r"^ STRESS\|\s+([xyz])\s+([-\d.E+]+)\s+([-\d.E+]+)\s+([-\d.E+]+)",
-        re.MULTILINE
+    # CP2K prints the stress tensor in Ha/Bohr³ in a block labelled:
+    #   STRESS TENSOR [a.u.]
+    #      X   Y   Z
+    #   X  ...
+    #   Y  ...
+    #   Z  ...
+    block_pat = re.compile(
+        r"STRESS TENSOR \[a\.u\.\].*?"
+        r"X\s+Y\s+Z\s*\n"
+        r"\s*X\s+([-\d.E+]+)\s+([-\d.E+]+)\s+([-\d.E+]+)\s*\n"
+        r"\s*Y\s+([-\d.E+]+)\s+([-\d.E+]+)\s+([-\d.E+]+)\s*\n"
+        r"\s*Z\s+([-\d.E+]+)\s+([-\d.E+]+)\s+([-\d.E+]+)",
+        re.DOTALL
     )
-
-    rows = {}
-    for m in row_pat.finditer(content):
-        label = m.group(1)
-        if label not in rows:    # keep only first occurrence of each row label
-            rows[label] = [float(m.group(2)), float(m.group(3)), float(m.group(4))]
-
-    if len(rows) != 3:
+    m = block_pat.search(content)
+    if not m:
         return None
 
-    stress_gpa = np.array([rows["x"], rows["y"], rows["z"]])  # (3,3) GPa
-    return stress_gpa * GPA_TO_EV_ANG3                        # eV/Ang^3
+    vals = [float(m.group(i)) for i in range(1, 10)]
+    stress_au = np.array(vals).reshape(3, 3)
+    return stress_au * HA_BOHR3_TO_EV_ANG3   # convert to eV/Å³
+
+def audit_and_requeue_specific_jobs(target_keywords, target_round=None, requeue=False):
+    """
+    Searches for job files across round directories matching provided keywords.
+    A) Checks if matching configurations exist in the master pool.
+    B) Checks if .inp and .out files exist, tracks duplicates/counts, and diagnoses failures.
+    C) Gives an option to append failed/missing jobs to submit_missing.sh.
+    """
+    from pathlib import Path
+    import re
+    from ase.io import read
+
+    # Determine directories to scan
+    if target_round is not None:
+        cp2k_dirs = [Path(f"cp2k_sp_round{target_round}")]
+    else:
+        # Dynamically find all round directories sorted numerically
+        cp2k_dirs = sorted(
+            Path(".").glob("cp2k_sp_round*"),
+            key=lambda p: [int(s) if s.isdigit() else s for s in re.split(r'(\d+)', p.name)]
+        )
+
+    if not cp2k_dirs:
+        print("[!] No cp2k_sp_round directories found.")
+        return
+
+    print("\n" + "="*70)
+    print(f"  Targeted Job Audit (Scanning: {[d.name for d in cp2k_dirs]})")
+    print("="*70)
+
+    # ----------------------------------------------------------------
+    # A) Pre-load Master Pool Configuration Names/System Types
+    # ----------------------------------------------------------------
+    pool_known_names = set()
+    if Path(POOL_FILE).exists():
+        try:
+            pool = read(POOL_FILE, index=":")
+            for atoms in pool:
+                if "system_type" in atoms.info:
+                    pool_known_names.add(atoms.info["system_type"])
+                if "name" in atoms.info:
+                    pool_known_names.add(atoms.info["name"])
+        except Exception as e:
+            print(f"[!] Error reading master pool: {e}")
+    else:
+        print(f"[!] Master pool {POOL_FILE} not found.")
+
+    # ----------------------------------------------------------------
+    # B) Discover and Diagnose matching files across directories
+    # ----------------------------------------------------------------
+    needs_rerun = []
+
+    for kw in target_keywords:
+        print(f"\n--- Searching for keyword: '{kw}' ---")
+        matched_jobs_in_kw = []
+
+        # Find all .inp files matching the keyword in any scanned folder
+        for cp2k_dir in cp2k_dirs:
+            if not cp2k_dir.exists():
+                continue
+            # Matches any filename containing the keyword
+            for inp_file in cp2k_dir.glob(f"*{kw}*.inp"):
+                matched_jobs_in_kw.append((inp_file.stem, cp2k_dir, inp_file))
+
+        print(f"--> Found {len(matched_jobs_in_kw)} matching job(s).")
+
+        for job_name, directory, inp_path in matched_jobs_in_kw:
+            out_path = directory / f"{job_name}.out"
+            
+            # Check pool presence (checking both exact and substring match)
+            in_pool = job_name in pool_known_names or any(kw in name for name in pool_known_names)
+            
+            has_out = out_path.exists()
+            status = "Unknown"
+            failed_midway = False
+
+            if has_out:
+                content = out_path.read_text()
+                if "SCF run NOT converged" in content:
+                    status = "Failed (SCF not converged)"
+                    failed_midway = True
+                elif not re.search(r"ENERGY\| Total FORCE_EVAL", content):
+                    status = "Failed (Crashed or Timeout)"
+                    failed_midway = True
+                else:
+                    status = "Success (Complete)"
+            else:
+                status = "Missing (.out file not found)"
+                failed_midway = True
+
+            print(f"  * Job: {job_name} ({directory.name})")
+            print(f"    - In master pool? : {'Yes' if in_pool else 'No'}")
+            print(f"    - Has .out file?  : {'Yes' if has_out else 'No'}")
+            print(f"    - Status Summary  : {status}")
+
+            if failed_midway:
+                needs_rerun.append((job_name, directory, inp_path))
+
+    # ----------------------------------------------------------------
+    # C) Append to submission scripts
+    # ----------------------------------------------------------------
+    if requeue and needs_rerun:
+        print(f"\n[→] Requeueing {len(needs_rerun)} failed/missing jobs...")
+        
+        # Group reruns by directory so we append to each round's respective script
+        from collections import defaultdict
+        grouped_reruns = defaultdict(list)
+        for job_name, directory, inp_path in needs_rerun:
+            grouped_reruns[directory].append((job_name, inp_path))
+
+        for directory, jobs_list in grouped_reruns.items():
+            submit_path = directory / "submit_missing.sh"
+            mode = "a" if submit_path.exists() else "w"
+            
+            with open(submit_path, mode) as f:
+                if mode == "w":
+                    f.write("#!/bin/bash\n")
+                    f.write(f"# Appended CP2K reruns\n")
+                    f.write("timestamp=$(date +%Y%m%d_%H%M)\n\n")
+                
+                for job_name, inp_path in jobs_list:
+                    f.write(f"echo \"Starting targeted rerun: {job_name}\"\n")
+                    f.write(f"timeout {CP2K_TIMEOUT} cp2k.ssmp -i {inp_path} -o {directory}/{job_name}.out || echo \"FAILED: {job_name}\" >> {directory}/failed_jobs.txt\n")
+            
+            print(f"  [✓] Appended {len(jobs_list)} jobs to {submit_path}")
+    elif requeue and not needs_rerun:
+        print("\n[✓] Audit finished. No failed or missing jobs found to requeue.")
+
+def recover_and_prioritize_missing(target_round=None, n_runs=100):
+    """
+    Analyzes all previously queued frames that failed or went missing,
+    compares them to the current successful POOL_FILE using Farthest 
+    Point Sampling (FPS), and generates new CP2K inputs for the most 
+    valuable missing structures.
+
+    Args:
+        target_round (int, optional): Restrict scan to a specific round.
+        n_runs (int): Number of inputs to generate.
+    """
+    import glob
+    from sklearn.preprocessing import normalize
+    
+    print("\n" + "="*60)
+    print(f"  Missing Structure Recovery & FPS Prioritization")
+    print(f"  Target Round : {target_round if target_round else 'All Rounds'}")
+    print(f"  Requested    : {n_runs} runs")
+    print("="*60)
+    
+    if Path(POOL_FILE).exists():
+        pool = read(POOL_FILE, index=":")
+        print(f"[→] Loaded {len(pool)} successful frames from master pool.")
+    else:
+        pool = []
+        print(f"[!] Master pool not found. Priority will be based only on diversity of missing frames.")
+        
+    if target_round is not None:
+            al_files = [f"al_selected_round{target_round}.xyz"]
+    else:
+            al_files = glob.glob("al_selected_round*.xyz")
+            
+    missing_frames = []
+    total_queued = 0
+    
+    for al_file in al_files:
+        if not os.path.exists(al_file):
+            print(f"  [!] AL file not found: {al_file} — skipping")
+            continue
+        
+        m = re.search(r"round(\d+)", al_file)
+        r_num = int(m.group(1)) if m else ROUND
+        frames = read(al_file, index=":")
+        total_queued += len(frames)
+        
+        for i, atoms in enumerate(frames):
+            sys_type = atoms.info.get("system_type", "unknown")
+            name = f"sp_{sys_type}_r{r_num}_{i:04d}"
+            out_file = Path(f"cp2k_sp_round{r_num}") / f"{name}.out"
+
+            # Check if the output is completely missing or failed SCF
+            if not _cp2k_output_is_complete(out_file):
+                missing_frames.append((name, atoms, r_num))
+
+    if not missing_frames:
+        print(f"\n[✓] Excellent! 0 out of {total_queued} expected outputs are missing.")
+        return
+
+    print(f"[→] Found {len(missing_frames)} missing/failed outputs out of {total_queued} queued.")
+
+    FEATURE_DIM = 300
+    def get_features(atoms_list):
+        feats = []
+        for a in atoms_list:
+            pos = a.get_positions().flatten()
+            if len(pos) >= FEATURE_DIM:
+                feats.append(pos[:FEATURE_DIM])
+            else:
+                feats.append(np.pad(pos, (0, FEATURE_DIM - len(pos))))
+        return normalize(np.array(feats)) if feats else np.array([])
+
+    print("\n[→] Calculating geometric value (FPS against master pool)...")
+    pool_feats = get_features(pool)
+    missing_feats = get_features([f[1] for f in missing_frames])
+
+    # Initial ranking: distance to the closest pool frame
+    if len(pool_feats) > 0:
+        initial_dists = []
+        for feat in missing_feats:
+            dists = np.linalg.norm(pool_feats - feat, axis=1)
+            initial_dists.append(np.min(dists))
+        initial_dists = np.array(initial_dists)
+    else:
+        initial_dists = np.full(len(missing_frames), np.inf)
+
+    # Show top 20 most valuable
+    initial_ranking = np.argsort(initial_dists)[::-1]
+    print("\n  Top 20 most valuable missing structures (furthest from pool):")
+    for i in range(min(20, len(initial_ranking))):
+        idx = initial_ranking[i]
+        name, _, r_num = missing_frames[idx]
+        dist = initial_dists[idx] if len(pool_feats) > 0 else 0.0
+        print(f"    {i+1:2d}. {name} (orig round: {r_num}) - Distance: {dist:.4f}")
+    
+    min_dists = np.copy(initial_dists)
+    selected_indices = []
+
+    for _ in range(min(n_runs, len(missing_frames))):
+        if len(pool_feats) == 0 and len(selected_indices) == 0:
+            best_idx = 0  # Arbitrary start if pool is totally empty
+        else:
+            best_idx = int(np.argmax(min_dists))
+
+        selected_indices.append(best_idx)
+
+        # Update distances iteratively to ensure diverse sampling
+        new_feat = missing_feats[best_idx]
+        new_dists = np.linalg.norm(missing_feats - new_feat, axis=1)
+        min_dists = np.minimum(min_dists, new_dists)
+
+    prioritized_frames = [missing_frames[idx][1] for idx in selected_indices]
+    
+    print(f"\n[→] Generating fresh CP2K inputs for the top {len(prioritized_frames)} prioritized frames...")
+    print(f"    Target directory: {CP2K_DIR} (Round {ROUND})")
+    
+    # Clean the system_type so it gets correctly tagged as a retry in the new round
+    for atoms in prioritized_frames:
+        original_sys = atoms.info.get("system_type", "unknown")
+        # Ensure we don't infinitely stack "retry_" tags
+        if not original_sys.startswith("retry_"):
+            atoms.info["system_type"] = f"retry_{original_sys}"
+
+    # Hand off to your existing writer (it handles submit_missing.sh automatically!)
+    write_all_sp_inputs(prioritized_frames, CP2K_DIR)
 
 def parse_cp2k_sp_results(cp2k_dir, selected_frames):
     """
@@ -958,7 +1207,7 @@ def is_physically_reasonable(atoms, calc, round_num=1):
         worst_atom = symbols[np.argmax(force_mags)]
         return False, f"MACE force {max_f:.2f} eV/Å on {worst_atom} exceeds ceiling {ceiling}"
     
-    if max_f > 5 * mean_f and max_f > 3.0:
+    if max_f > 20 * mean_f and max_f > 3.0:
         worst_atom = symbols[np.argmax(force_mags)]
         return False, f"Force outlier: {worst_atom} ({max_f:.2f} eV/Å) vs mean ({mean_f:.2f} eV/Å)"
 
@@ -1355,7 +1604,7 @@ def parse_positions_from_out(content):
 
     return symbols, np.array(positions)
  
-def parse_all_cp2k_outputs():
+def parse_all_cp2k_outputs(target_round=None):
     """
     Scan ALL cp2k_sp_round* directories. For each complete .out file,
     read atomic positions from the matching .out file, parse energy and
@@ -1370,7 +1619,7 @@ def parse_all_cp2k_outputs():
     import glob
 
     print("\n" + "="*60)
-    print("  Full CP2K Output Scan")
+    print(f"  CP2K Output Scan {'(Round ' + str(target_round) + ' Only)' if target_round else 'All Rounds'}")
     print("="*60)
 
     # ----------------------------------------------------------------
@@ -1390,7 +1639,11 @@ def parse_all_cp2k_outputs():
     # ----------------------------------------------------------------
     # Step 2 — Find all cp2k_sp_round* directories
     # ----------------------------------------------------------------
-    round_dirs = sorted(glob.glob("cp2k_sp_round*"))
+    if target_round is not None:
+        round_dirs = sorted(glob.glob(f"cp2k_sp_round{target_round}"))
+    else:
+        round_dirs = sorted(glob.glob("cp2k_sp_round*"))
+
     if not round_dirs:
         print("\n[!] No cp2k_sp_round* directories found.")
         return
@@ -1668,9 +1921,13 @@ if __name__ == "__main__":
     parser.add_argument("--reparse",   action="store_true")
     parser.add_argument("--e0",        action="store_true")
     parser.add_argument("--parse-all", action="store_true", dest="parse_all")
+    parser.add_argument("--target",    type=int, default=None, help="Target round number for --parse-all and --recover (optional)")
     parser.add_argument("--dissolve",  action="store_true")
+    parser.add_argument("--recover",   action="store_true", help="Analyze missing frames, FPS prioritize, and write new inputs")
+    parser.add_argument("--audit-jobs", nargs="+", default=[], help="List of specific job names to audit")
+    parser.add_argument("--requeue", action="store_true", help="Append the audited jobs to a submission script if they failed")
     parser.add_argument("--runs",      type=int, default=100, help="How many cp2k runs are required")
-    parser.add_argument("--model",     type=str, default="mace-mp-0b3-medium-float32.model", help="What model to validate with?")
+    parser.add_argument("--model",     type=str, default="/home/user/Documents/Programs/Python/ASE/MACE/mace-mp-0b3-medium-float32.model", help="What model to validate with?")
     parser.add_argument(
     "--exclude",
     nargs="*",
@@ -1703,11 +1960,18 @@ if __name__ == "__main__":
             _write_submission_script(
                 Path(E0_DIR)/"submit_e0.sh", jobs, E0_DIR, "E0s", len(elements), 0
             )
-            
+    elif args.recover:
+        recover_and_prioritize_missing(target_round=args.target, n_runs=args.runs)    
+    elif args.audit_jobs:
+        audit_and_requeue_specific_jobs(
+            target_keywords=args.audit_jobs, 
+            target_round=args.target, 
+            requeue=args.requeue
+        )
     elif args.reparse:
         reparse_failed()          
     elif args.parse_all:
-        parse_all_cp2k_outputs()
+        parse_all_cp2k_outputs(target_round=args.target)
     elif args.parse:
         parse_and_update()        
     else:
