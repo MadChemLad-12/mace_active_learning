@@ -3,8 +3,8 @@ from mace.calculators import MACECalculator
 from ase.io import read
 import numpy as np
 
-MODEL_PATH = "/mace-mp-0b3-medium-float32.model"
-POOL_FILE  = "/active_learning/training_bad.xyz"
+MODEL_PATH = "mace-mp-0b3-medium-float32.model"
+POOL_FILE  = "active_learning/training_bad.xyz"
 
 # Load pool and sort by volume largest first
 pool = read(POOL_FILE, index=":")

@@ -151,7 +151,7 @@ for index, atoms in enumerate(unique_frames):
     ref_f     = atoms.arrays["REF_forces"]
     max_f_ref = np.max(np.linalg.norm(ref_f, axis=1))
 
-    if max_f_ref > 25:
+    if max_f_ref > MAX_FORCE_REF:
         bad.append(atoms)
         bad_info.append(f"[ref_force_too_large] {stype} index={index} "
                         f"max_ref_F={max_f_ref:.2f} eV/Å")
@@ -165,11 +165,11 @@ for index, atoms in enumerate(unique_frames):
     max_mace = np.max(np.linalg.norm(mace_f, axis=1))
 
     if   "Pt" in symbols_set and pt_count > 3:           # Pt slab
-        rmse_thresh = 400
+        rmse_thresh = 600
     elif symbols_set <= {"H", "O"}:                      # bulk water
-        rmse_thresh = 800
+        rmse_thresh = 1000
     elif any(s in symbols_set for s in ("F", "S")):      # Nafion
-        rmse_thresh = 800
+        rmse_thresh = 1000
     else:                                                 # dissolved Pt / fallback
         rmse_thresh = MAX_RMSE
 
