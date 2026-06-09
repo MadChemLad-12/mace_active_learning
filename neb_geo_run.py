@@ -81,9 +81,12 @@ SKIP_NEB      = False      # Set to True to skip NEB workflow
 N_IMAGES      = 10         # Number of intermediate frames
 NEB_FMAX      = 0.05       # Force threshold for the band
 NEB_OPTIMIZER = "FIRE"     # FIRE is generally more stable for NEB
-CLIMB         = True       # CI-NEB: finds the exact transition state
+CLIMB         = False       # CI-NEB: finds the exact transition state
 MAX_WARNINGS   = 8          # Max allowed atoms moved > FIX_HEIGHT_THRESHOLD before flagging
 MAX_Threshold = 10.0         # Distance threshold (Å) for mapping consistency check
+
+# Cache Settings
+CACHE_FILE_NAME = "persistent_calc_cache.json"
 
 # ==============================================================================
 # PLUMED / Metadynamics settings
@@ -162,6 +165,7 @@ AIMD_WARMUP_TEMP = 100          # Warmup temperature in K
 # One file per system, named:  mace_geoopt_{name}.extxyz  (geo-opt frames)
 #                              mace_neb_{name}.extxyz      (NEB frames)
 AL_EXPORT_DIR = "al_candidates"  # sub-directory inside OUTPUT_DIR
+AL_EXPORT_DIR = os.path.join(OUTPUT_DIR, "al_candidates")
 
 # ==============================================================================
 # CONFIGURATIONS — loaded from CSV
@@ -187,6 +191,27 @@ def make_output_dir():
     os.makedirs(os.path.join(OUTPUT_DIR, AL_EXPORT_DIR), exist_ok=True)
     print(f"[✓] Output directory: {OUTPUT_DIR}/")
     print(f"[✓] AL export directory: {OUTPUT_DIR}/{AL_EXPORT_DIR}/\n")
+
+def load_persistent_cache():
+    """Loads calculation cache data from disk if it exists."""
+    cache_path = os.path.join(OUTPUT_DIR, CACHE_FILE_NAME)
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r") as f:
+                print(f"[✓] Loaded persistent execution cache from {cache_path}")
+                return json.load(f)
+        except Exception as e:
+            print(f"[!] Warning: Failed to load cache file ({e}). Starting fresh.")
+    return {}
+
+def save_persistent_cache(cache_data):
+    """Saves calculation cache data to disk."""
+    cache_path = os.path.join(OUTPUT_DIR, CACHE_FILE_NAME)
+    try:
+        with open(cache_path, "w") as f:
+            json.dump(cache_data, f, indent=4)
+    except Exception as e:
+        print(f"[✗] Critical: Could not save persistent cache file: {e}")
 
 def check_mapping_consistency(atoms_ref, atoms_to_map, threshold=MAX_Threshold, max_warnings=MAX_WARNINGS):
     """
@@ -407,6 +432,51 @@ def print_progress_bar(current, total, config_name):
 # ==============================================================================
 # NEB WORKFLOW  (fixed image-list construction + AL export)
 # ==============================================================================
+def get_energy_barrier(images, name):
+    """
+    Extract the forward and reverse energy barriers from a converged NEB.
+    The climbing image is the highest-energy intermediate (not an endpoint).
+    
+    Returns: dict with barrier values and the transition state image index.
+    """
+    # Endpoints are fixed — get their energies
+    E_initial = images[0].get_potential_energy()
+    E_final   = images[-1].get_potential_energy()
+
+    # Intermediate images only (exclude endpoints)
+    intermediate_energies = [
+        (i, img.get_potential_energy())
+        for i, img in enumerate(images[1:-1], start=1)
+    ]
+
+    # The transition state is the highest-energy intermediate
+    ts_idx, E_ts = max(intermediate_energies, key=lambda x: x[1])
+
+    E_barrier_forward = E_ts - E_initial   # Pt dissolution barrier (eV)
+    E_barrier_reverse = E_ts - E_final     # Pt re-deposition barrier (eV)
+    E_reaction        = E_final - E_initial # Overall reaction energy (eV)
+
+    print(f"\n{'='*50}")
+    print(f"  Energy Barrier Summary: {name}")
+    print(f"{'='*50}")
+    print(f"  E_initial             : {E_initial:.4f} eV")
+    print(f"  E_transition_state    : {E_ts:.4f} eV  (image {ts_idx})")
+    print(f"  E_final               : {E_final:.4f} eV")
+    print(f"  Forward barrier (dissolution) : {E_barrier_forward:+.4f} eV")
+    print(f"  Reverse barrier (deposition)  : {E_barrier_reverse:+.4f} eV")
+    print(f"  Reaction energy ΔE            : {E_reaction:+.4f} eV")
+    print(f"{'='*50}\n")
+
+    return {
+        "name":             name,
+        "E_initial":        E_initial,
+        "E_ts":             E_ts,
+        "E_final":          E_final,
+        "ts_image_index":   ts_idx,
+        "barrier_forward":  E_barrier_forward,
+        "barrier_reverse":  E_barrier_reverse,
+        "reaction_energy":  E_reaction,
+    }
 
 def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=False):
     """
@@ -425,6 +495,8 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
       - {OUTPUT_DIR}/{name}_neb.extxyz
       - {OUTPUT_DIR}/{AL_EXPORT_DIR}/mace_neb_{name}.extxyz
     """
+    import matplotlib.pyplot as plt
+    from ase.mep import NEBTools
     print(f"\n[→] Starting NEB for: {name}")
 
     # ── 1. Basic sanity checks ────────────────────────────────────────────────
@@ -481,20 +553,20 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
     # ── 4. Build image list ─────────────────────────────────────────────────── 
     images = [init_atoms.copy()]
     for _ in range(N_IMAGES):
-        images.append(init_atoms.copy())
+        images.append(init_atoms.copy())  
     images.append(final_atoms.copy())
 
-    for image in images:
-        image.calc = calc
-        
-    # ── 5. Interpolate and constrain ─────────────────────────────────────────
-    neb = NEB(images, climb=CLIMB, allow_shared_calculator=True)
-    neb.interpolate(apply_constraint=False)  # Don't apply constraints to interpolated images
+    # ── 5. Interpolate, then assign calculators and constrain ─────────────────────
+    neb = NEB(images, climb=CLIMB, allow_shared_calculator=False)
+    neb.interpolate(apply_constraint=False)  # interpolate positions first
 
     fixed_indices = get_fixed_indices(init_atoms)
     if fixed_indices:
-        for image in images:  
+        for image in images:
             image.set_constraint(FixAtoms(indices=fixed_indices))
+
+    for image in images:
+        image.calc = calc  
 
     # ── 6. Optimise ───────────────────────────────────────────────────────────
     neb_traj_path = os.path.join(OUTPUT_DIR, f"{name}_neb.traj")
@@ -509,11 +581,18 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
         t0 = time.perf_counter()
         optimizer.run(fmax=NEB_FMAX, steps=MAX_STEPS)
         print(f"[✓] NEB completed for {name} in {time.perf_counter() - t0:.2f} s")
+        get_energy_barrier(images, name)
+        
     except Exception as e:
         print(f"[✗] NEB failed for {name}: {e}")
 
     # ── 7. Tag and export ─────────────────────────────────────────────────────
     for idx, img in enumerate(images):
+        img.info.pop('energy', None)
+        img.info.pop('free_energy', None)
+        img.arrays.pop('forces', None)
+        img.arrays.pop('energies', None)
+
         img.info["system_type"] = name
         img.info["neb_image"]   = idx
         img.info["source"]      = "mace_neb"
@@ -522,11 +601,24 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
     # Standard visualisation output
     write(os.path.join(OUTPUT_DIR, f"{name}_neb.extxyz"), images, format="extxyz")
 
+    # Using ase neb tools
+    nebtools = NEBTools(images)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    nebtools.plot_band(ax=ax)
+    ax.set_title("NEB Energy Barrier Profile", fontsize=14, fontweight='bold')
+    ax.grid(True, linestyle="--", alpha=0.5)
+    plt.tight_layout()
+    fig_path = os.path.join(OUTPUT_DIR, f"{name}_neb_energy_profile.png")
+    plt.savefig(fig_path)
+    plt.close()
+    print(f"[✓] NEB visualisation plots saved for {name}")
+    
     # Active-learning candidate export (one file per system)
     al_path = os.path.join(OUTPUT_DIR, AL_EXPORT_DIR, f"mace_neb_{name}.extxyz")
     write(al_path, images, format="extxyz")
     print(f"[✓] NEB frames exported for AL: {al_path}")
 
+    
     return images
 
 # ==============================================================================
@@ -886,7 +978,7 @@ def main():
                         help="Override model path")
     parser.add_argument("--skip-plumed", action="store_true",
                         help="Skip PLUMED sampling (default for rounds 1-2)")
-    parser.add_argument("--skip-neb", action="store_true",
+    parser.add_argument("--skip-neb",  action="store_true",
                         help="Skip neb sampling")
     parser.add_argument("--run-plumed",  action="store_true",
                         help="Alias for --skip-plumed=False, enable PLUMED")
@@ -930,12 +1022,13 @@ def main():
         print(f"[✓] Model overridden by argument: {MACE_MODEL_PATH}")
     
     make_output_dir()
+    persistent_cache = load_persistent_cache()
+    
     calc  = load_mace()
     start = time.perf_counter()
 
-    total_configs    = len(CONFIGURATIONS)
-    optimisation_cache = {}
-    results          = []
+    total_configs = len(CONFIGURATIONS)
+    results = []
     print(f"The simulation will run on {DEVICE.upper()} with MACE model: {os.path.basename(MACE_MODEL_PATH)}")
     print(f"Program started at {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f" Starting calculations for {total_configs} configurations...\n")
@@ -961,6 +1054,9 @@ def main():
             "aimd_frames": 0,
         }
 
+        # Dict to pass live optimized atoms into downstream workflows
+        current_run_atoms = {}
+
         # --- Optimise both endpoints ---
         for label, path in [("initial", init_path), ("final", final_path)]:
             if not os.path.exists(path):
@@ -968,7 +1064,31 @@ def main():
                 config_result[f"{label}_status"] = "FILE NOT FOUND"
                 continue
 
-            atoms     = read(path)
+            # Check if this exact filesystem path has been optimized before globally
+            if path in persistent_cache:
+                print(f"  [✓] Global Cache Hit for {label} structure ({os.path.basename(path)})")
+                cached_data = persistent_cache[path]
+                
+                # Check if file generated exists, read it back
+                if os.path.exists(cached_data["opt_file"]):
+                    opt_atoms = read(cached_data["opt_file"])
+                    current_run_atoms[label] = opt_atoms
+                    
+                    config_result.update({
+                        f"{label}_energy_eV": cached_data["energy_eV"],
+                        f"{label}_converged": cached_data["converged"],
+                        f"{label}_fmax":      cached_data["fmax"],
+                        f"{label}_steps":     cached_data["steps"],
+                        f"{label}_status":    cached_data["status"],
+                        f"{label}_opt_file":  cached_data["opt_file"],
+                    })
+                    print(f"      Restored: E = {cached_data['energy_eV']:.4f} eV | Status = {cached_data['status']}")
+                    continue
+                else:
+                    print(f"  [!] Cache found but file {cached_data['opt_file']} is missing. Re-running calculation.")
+
+            # Run calculations normally if cache misses
+            atoms = read(path)
             atoms.calc = calc
 
             if SKIP_OPTIMISATION:
@@ -978,22 +1098,27 @@ def main():
                 status    = "SKIPPED (Used Raw)"
                 opt_atoms = atoms
             else:
-                if path in optimisation_cache:
-                    print(f"  [→] Reusing cached results for {label} ({os.path.basename(path)})")
-                    opt_atoms, e, conv, steps, fmax = optimisation_cache[path]
-                else:
-                    print(f"  [→] Optimising {label} structure...")
-                    opt_atoms, e, conv, steps, fmax = optimise_structure(atoms, calc, label, name)
-                    if e is not None:
-                        optimisation_cache[path] = (opt_atoms.copy(), e, conv, steps, fmax)
+                print(f"  [→] Optimising {label} structure...")
+                opt_atoms, e, conv, steps, fmax = optimise_structure(atoms, calc, label, name)
 
             if e is not None:
                 status = classify_stability(conv, fmax, steps)
-                print(f"  [{'✓' if conv else '~'}] {label.capitalize()}: "
-                      f"E = {e:.4f} eV | Steps = {steps} | {status}")
+                print(f"  [{'✓' if conv else '~'}] {label.capitalize()}: E = {e:.4f} eV | Steps = {steps} | {status}")
 
                 out_file = os.path.join(OUTPUT_DIR, f"{name}_{label}_opt.cif")
                 write(out_file, opt_atoms)
+                current_run_atoms[label] = opt_atoms
+
+                # Commit metrics to persistent cache
+                persistent_cache[path] = {
+                    "energy_eV": float(e),
+                    "converged": bool(conv),
+                    "fmax":      float(fmax),
+                    "steps":     int(steps),
+                    "status":    status,
+                    "opt_file":  out_file
+                }
+                save_persistent_cache(persistent_cache)
 
                 config_result.update({
                     f"{label}_energy_eV": float(e),
@@ -1006,35 +1131,22 @@ def main():
             else:
                 config_result[f"{label}_status"] = "FAILED"
 
-        # --- Export geo-opt frames for active_pipeline.py ---
-        init_cached  = optimisation_cache.get(init_path)
-        final_cached = optimisation_cache.get(final_path)
-        if init_cached and final_cached:
-            export_geoopt_for_al(name, init_cached[0], final_cached[0])
+        # ── EXPORT GEO-OPT FOR AL ─────────────────────────────────────────────
+        if "initial" in current_run_atoms and "final" in current_run_atoms:
+            export_geoopt_for_al(name, current_run_atoms["initial"], current_run_atoms["final"])
         elif SKIP_OPTIMISATION:
-            # Reconstruct from config_result if we skipped optimisation
             if os.path.exists(init_path) and os.path.exists(final_path):
                 export_geoopt_for_al(name, read(init_path), read(final_path))
 
-        # --- NEB ---
-        init_ok  = ("STABLE" in config_result.get("initial_status", "")
-                    or SKIP_OPTIMISATION)
-        final_ok = ("STABLE" in config_result.get("final_status",   "")
-                    or SKIP_OPTIMISATION)
+        # ── NEB STEP ──────────────────────────────────────────────────────────
+        init_ok  = "STABLE" in config_result.get("initial_status", "") or SKIP_OPTIMISATION
+        final_ok = "STABLE" in config_result.get("final_status", "") or SKIP_OPTIMISATION
  
-        init_for_neb  = None
-        final_for_neb = None
-        if init_ok and os.path.exists(init_path):
-            init_for_neb = (optimisation_cache[init_path][0]
-                            if init_path in optimisation_cache
-                            else read(init_path))
-        if final_ok and os.path.exists(final_path):
-            final_for_neb = (optimisation_cache[final_path][0]
-                             if final_path in optimisation_cache
-                             else read(final_path))
+        init_for_neb  = current_run_atoms.get("initial")
+        final_for_neb = current_run_atoms.get("final")
             
         if not SKIP_NEB:
-            if init_for_neb is not None and final_for_neb is not None:
+            if init_for_neb is not None and final_for_neb is not None and init_ok and final_ok:
                 neb_workflow(init_for_neb, final_for_neb, calc, name)
                 config_result["neb_run"] = True
             else:
