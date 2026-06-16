@@ -136,14 +136,14 @@ fi
 EVAL_CONFIGS="${EVAL_CONFIGS:-fps_validate_framesV1.xyz}"
 
 # Training hyperparameters
-VALIDATION_FRACTION=0.2
-BATCH_SIZE=2
+VALIDATION_FRACTION=0.1
+BATCH_SIZE=4
 LR=0.0001
-MAX_EPOCHS=200
-SWA_START=150
-PATIENCE=50
+MAX_EPOCHS=400
+SWA_START=300
+PATIENCE=30
 R_MAX=6.0
-NUM_SAMPLES_PT=900   # Materials Project frames to mix in during multi-head training
+NUM_SAMPLES_PT=1200   # Materials Project frames to mix in during multi-head training
 
 # Elements present across ALL your systems (atomic numbers)
 # H=1, C=6, O=8, F=9, S=16, Pt=78
@@ -251,13 +251,12 @@ mace_run_train \
     --swa \
     --start_swa "$SWA_START" \
     --swa_energy_weight=10 \
-    --swa_forces_weight=100 \
+    --swa_forces_weight=500 \
     --swa_stress_weight=0 \
     --multiheads_finetuning=True \
     --pt_train_file="mp" \
     --num_samples_pt="$NUM_SAMPLES_PT" \
-    --device=cuda \
-    2>&1 | tee "$TRAIN_LOG"
+    --device=cuda 
 
 train_exit=${PIPESTATUS[0]}
 

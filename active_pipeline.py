@@ -59,10 +59,10 @@ MODEL_PATH  = (f"mace_V{ROUND-1}_active_learning_stagetwo.model" if ROUND > 3
 AL_INPUT_DIR  = "geo_opt_results/al_candidates"
 
 # How many frames to send to CP2K per round (total across all systems)
-N_SELECT_TOTAL = 200
-MAX_ATOMS = 500.0 # This is to prevent the data set becoming too large and wasting gpu
+N_SELECT_TOTAL = 100
+MAX_ATOMS = 350.0 # This is to prevent the data set becoming too large and wasting gpu
 REUSE_EXISTING_CP2K = True # If true, skip writing inputs for frames that already have valid CP2K outputs (useful for iterative rounds)
-EXCLUDE_SYSTEM_KEYWORDS = ["DRY"] 
+EXCLUDE_SYSTEM_KEYWORDS = [] 
 
 def apply_round(n):
     """
@@ -84,7 +84,7 @@ FORCE_THRESHOLD = 0.5   # eV/Å
 # Output paths
 CP2K_DIR   = f"cp2k_sp_round{ROUND}"
 POOL_FILE  = "master_train_pool.xyz"
-CP2K_TIMEOUT = "4h"  # Per-job timeout for CP2K runs (adjust as needed)
+CP2K_TIMEOUT = "3h"  # Per-job timeout for CP2K runs (adjust as needed)
 FAILED_LOG = f"{CP2K_DIR}/failed_jobs.txt"   # written by your timeout wrapper
 
 # E0s Json
@@ -365,6 +365,7 @@ CP2K_TEMPLATE = """\
   STRESS_TENSOR ANALYTICAL 
 &END FORCE_EVAL
 """
+
 KIND_TEMPLATE = """\
     &KIND {symbol}
       BASIS_SET {basis}
@@ -546,23 +547,55 @@ def _cp2k_output_is_complete(outfile):
 
 def _write_submission_script(path, jobs, cp2k_dir, label, n_total, n_skipped):
     """Write a bash submission script for the given list of (name, inp) jobs."""
+    skip_comment = (
+        f"# {n_skipped} of {n_total} frames skipped (completed .out already present)\n"
+        if n_skipped else ""
+    )
+    header = f"""\
+#!/bin/bash
+# CP2K single-point calculations - Round {ROUND} ({label})
+{skip_comment}
+timestamp=$(date +%Y%m%d_%H%M)
+start_time=$(date +%s)
+counter=0
+total={len(jobs)}
+print_eta() {{
+    if (( counter > 0 && elapsed > 0 )); then
+        avg=$(( elapsed / counter ))
+        eta=$(( avg * (total - counter) ))
+        echo "  ETA: ~$(( remaining / 60 ))m remaining"
+    fi
+}}
+
+
+cleanup() {{
+    echo "Interrupted at job $counter/$total"
+    rm -f *.wfn *.wfn.bak-1
+    exit 1
+}}
+trap cleanup INT TERM
+"""
+    
+    job_blocks = []
+    for name, inp in jobs:
+        block = f"""\
+        counter=$((counter + 1))
+        echo "[$counter/$total] {name} — started $(date +%H:%M)"
+        timeout {CP2K_TIMEOUT} cp2k.ssmp -i {inp} -o {cp2k_dir}/{name}.out \\
+            || echo "FAILED: {name}" >> {cp2k_dir}/failed_jobs.txt 
+        echo "  finished $(date +%H:%M)"
+        elapsed=$(( $(date +%s) - start_time ))
+        print_eta
+        if (( counter % 10 == 0 )); then
+            rm -f *.wfn *.wfn.bak-1
+        fi
+        
+        """
+        job_blocks.append(block)
+        
     with open(path, "w") as f:
-        f.write("#!/bin/bash\n")
-        f.write(f"# CP2K single-point calculations - Round {ROUND} ({label})\n")
-        if n_skipped:
-            f.write(f"# {n_skipped} of {n_total} frames skipped "
-                    f"(completed .out already present)\n")
-        f.write(f"timestamp=$(date +%Y%m%d_%H%M)\n")
-        f.write(f"counter=0\n\n")
-        for name, inp in jobs:
-            f.write(
-                f"counter=$((counter + 1))\n"
-                f"echo \"[$counter/{len(jobs)}] {name} — started $(date +%H:%M)\"\n"
-                f"timeout {CP2K_TIMEOUT} cp2k.ssmp -i {inp} "
-                f"-o {cp2k_dir}/{name}.out "
-                f'|| echo "FAILED: {name}" >> {cp2k_dir}/failed_jobs.txt\n'
-                f"echo \"  finished $(date +%H:%M)\"\n"
-            )
+        f.write(header)
+        f.write("\n".join(job_blocks))
 
 def write_all_sp_inputs(selected_frames, cp2k_dir):
     """
@@ -688,47 +721,68 @@ BOHR_TO_ANG = Bohr       # Bohr → Å source https://conversion.org/length/bohr
 HA_BOHR_TO_EV_ANG = HA_TO_EV / BOHR_TO_ANG   # force unit conversion
 HA_BOHR3_TO_EV_ANG3 = HA_TO_EV / (BOHR_TO_ANG ** 3) 
 
+# Note on stress parsing: Need to fix it as it doesnt always detect stress block
 def parse_stress_from_out(content):
     """
     Parse the stress tensor from a CP2K .out file.
 
-    CP2K prints the stress tensor in a block like:
+    CP2K prints the analytical stress tensor in the PRINT / STRESS_TENSOR block:
+
         STRESS| Analytical stress tensor [GPa]
-        STRESS|                    X                   Y                   Z
-        STRESS| X         -1.234567890         0.000000000         0.000000000
-        STRESS| Y          0.000000000        -1.234567890         0.000000000
-        STRESS| Z          0.000000000         0.000000000        -1.234567890
+        STRESS|                        x                   y                   z
+        STRESS|      x       -3.510...    -0.046...    -0.003...
+        STRESS|      y       -0.046...    -1.367...     0.164...
+        STRESS|      z       -0.003...     0.164...    -1.109...
 
-    Note: CP2K reports stress in GPa in the log, but the raw internal value used
-    for training is in Ha/Bohr³. We parse the Ha/Bohr³ block instead so we can
-    apply our own unit conversion to eV/Å³.
+    This is followed by eigenvalue/eigenvector rows that we must not accidentally
+    capture.  The STRESS| prefix on every data row makes this unambiguous.
 
-    Returns a (3, 3) numpy array in eV/Å³, or None if the block is not found.
-    The matrix is symmetric; MACE training uses the Voigt 6-component form
-    [xx, yy, zz, yz, xz, xy] which you can get with:
+    We first try this GPa block (present in all modern CP2K ENERGY_FORCE runs
+    with STRESS_TENSOR ANALYTICAL).  As a fallback we also try the older
+    "STRESS TENSOR [a.u.]" plain-text block that appears in some CP2K versions.
+
+    Returns a (3, 3) numpy array in eV/Å³, or None if no block is found.
+    The matrix is symmetric; caller should convert to MACE Voigt 6-vector:
         voigt = stress_matrix[[0,1,2,1,0,0], [0,1,2,2,2,1]]
     """
-    # CP2K prints the stress tensor in Ha/Bohr³ in a block labelled:
-    #   STRESS TENSOR [a.u.]
-    #      X   Y   Z
-    #   X  ...
-    #   Y  ...
-    #   Z  ...
-    block_pat = re.compile(
+    # -------------------------------------------------------------------
+    # Strategy 1: STRESS| Analytical stress tensor [GPa]  (preferred)
+    # Matches exactly 3 data rows immediately after the header row.
+    # Uses case-insensitive row labels so X/x both work.
+    # -------------------------------------------------------------------
+    gpa_pat = re.compile(
+        r"STRESS\| Analytical stress tensor \[GPa\]\s*\n"
+        r"[ \t]*STRESS\|[^\n]*\n"                         # column-header row  (x  y  z)
+        r"[ \t]*STRESS\|\s+[xX]\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s*\n"
+        r"[ \t]*STRESS\|\s+[yY]\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s*\n"
+        r"[ \t]*STRESS\|\s+[zZ]\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)"
+    )
+    m = gpa_pat.search(content)
+    if m:
+        vals = [float(m.group(i)) for i in range(1, 10)]
+        stress_gpa = np.array(vals).reshape(3, 3)
+        # 1 GPa = 1/160.2176634 eV/Å³  (exact SI definition)
+        GPa_TO_EV_ANG3 = 1.0 / 160.2176634
+        return stress_gpa * GPa_TO_EV_ANG3
+
+    # -------------------------------------------------------------------
+    # Strategy 2: STRESS TENSOR [a.u.]  (older CP2K / some versions)
+    # -------------------------------------------------------------------
+    au_pat = re.compile(
         r"STRESS TENSOR \[a\.u\.\].*?"
         r"X\s+Y\s+Z\s*\n"
-        r"\s*X\s+([-\d.E+]+)\s+([-\d.E+]+)\s+([-\d.E+]+)\s*\n"
-        r"\s*Y\s+([-\d.E+]+)\s+([-\d.E+]+)\s+([-\d.E+]+)\s*\n"
-        r"\s*Z\s+([-\d.E+]+)\s+([-\d.E+]+)\s+([-\d.E+]+)",
+        r"\s*X\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s*\n"
+        r"\s*Y\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s*\n"
+        r"\s*Z\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)\s+([-\d.E+e-]+)",
         re.DOTALL
     )
-    m = block_pat.search(content)
-    if not m:
-        return None
+    m = au_pat.search(content)
+    if m:
+        vals = [float(m.group(i)) for i in range(1, 10)]
+        stress_au = np.array(vals).reshape(3, 3)
+        return stress_au * HA_BOHR3_TO_EV_ANG3   # Ha/Bohr³ → eV/Å³
 
-    vals = [float(m.group(i)) for i in range(1, 10)]
-    stress_au = np.array(vals).reshape(3, 3)
-    return stress_au * HA_BOHR3_TO_EV_ANG3   # convert to eV/Å³
+    return None
 
 def audit_and_requeue_specific_jobs(target_keywords, target_round=None, requeue=False):
     """
@@ -1207,7 +1261,7 @@ def is_physically_reasonable(atoms, calc, round_num=1):
         worst_atom = symbols[np.argmax(force_mags)]
         return False, f"MACE force {max_f:.2f} eV/Å on {worst_atom} exceeds ceiling {ceiling}"
     
-    if max_f > 20 * mean_f and max_f > 3.0:
+    if max_f > 5 * mean_f and max_f > 3.0:
         worst_atom = symbols[np.argmax(force_mags)]
         return False, f"Force outlier: {worst_atom} ({max_f:.2f} eV/Å) vs mean ({mean_f:.2f} eV/Å)"
 
@@ -1676,14 +1730,21 @@ def parse_all_cp2k_outputs(target_round=None):
         out_files = sorted(Path(cp2k_dir).glob("sp_*.out"))
         print(f"\n[→] Round {round_num}: scanning {len(out_files)} .out files...")
 
+        n_symlinks   = 0
+        n_incomplete = 0
+        n_excluded   = 0
+        n_too_large  = 0
+        n_dup        = 0
         for out_path in out_files:
 
             # Skip symlinks — already counted under their source name
             if out_path.is_symlink():
+                n_symlinks += 1
                 continue
 
             # Check .out is complete before doing any work
             if not _cp2k_output_is_complete(out_path):
+                n_incomplete += 1
                 continue
             
             # --------------------------------------------------------
@@ -1694,14 +1755,23 @@ def parse_all_cp2k_outputs(target_round=None):
             # Extract cell: ABC a b c
             cell_matrix = parse_cell_from_out(out_content)
             if cell_matrix is None:
+                # Diagnose: show what CELL| lines are actually present
+                cell_lines = [l.strip() for l in out_content.splitlines()
+                              if "CELL|" in l and "Vector" in l]
                 print(f"  [!] Could not parse cell from {out_path.name} — skipping")
+                if cell_lines:
+                    print(f"      (Found CELL| lines: {cell_lines[:3]})")
+                else:
+                    print(f"      (No 'CELL| Vector' lines found — check CP2K output format)")
                 parse_failed += 1
                 continue
 
             # Parse positions from .out
             symbols, positions = parse_positions_from_out(out_content)
             if symbols is None:
+                has_qs = "MODULE QUICKSTEP: ATOMIC COORDINATES IN ANGSTROM" in out_content
                 print(f"  [!] Could not parse positions from {out_path.name} — skipping")
+                print(f"      (QUICKSTEP coord block present: {has_qs})")
                 parse_failed += 1
                 continue
 
@@ -1716,15 +1786,22 @@ def parse_all_cp2k_outputs(target_round=None):
 
             # system_type from filename as before
             stem = out_path.stem
-            m2 = re.match(r"sp_(.+)_r\d+_\d+$", stem)
-            sys_type = m2.group(1) if m2 else "unknown"
+            m2 = re.match(r"sp_(.+?)_r\d+(?:_\d+)?$", stem)
+            if not m2:
+                # Filename doesn't match expected sp_{sys}_r{N}_{i:04d} pattern
+                print(f"  [!] Filename {stem} doesn't match sp_*_rN_NNNN pattern — skipping")
+                parse_failed += 1
+                continue
+            sys_type = m2.group(1)
             if _is_excluded(sys_type):
+                n_excluded += 1
                 continue
             atoms.info["system_type"] = sys_type
 
             # Check hash against pool before parsing .out
             geom_hash = get_atoms_hash(atoms)
             if geom_hash in pool_hashes:
+                n_dup += 1
                 already_have += 1
                 continue
                         
@@ -1734,6 +1811,7 @@ def parse_all_cp2k_outputs(target_round=None):
             if n_atoms > MAX_ATOMS:
                 print(f"  [!] {out_path.name}: {n_atoms} atoms exceeds limit "
                       f"({MAX_ATOMS}) — skipping")
+                n_too_large += 1
                 parse_failed += 1
                 continue
             # --------------------------------------------------------
@@ -1758,24 +1836,23 @@ def parse_all_cp2k_outputs(target_round=None):
             residual = (energy_eV - e_ref) / len(atoms)
 
             if pt_count > 3:                                         # Pt slab
-                res_lo, res_hi = -8.0, -1.0
+                res_lo, res_hi = -20.0, 10.0
             elif pt_count > 0:                                       # dissolved Pt
-                res_lo, res_hi = -8.0, -0.0
+                res_lo, res_hi = -20.0, 10.0
             elif any(s in symbols_set for s in ("F", "S", "C")):    # Nafion
-                res_lo, res_hi = -6.0, -1.0
+                res_lo, res_hi = -20.0, 10.0
             elif symbols_set <= {"H", "O"}:                         # bulk water
-                res_lo, res_hi = -6.0, -1.0
+                res_lo, res_hi = -20.0, 10.0
             else:                                                    # fallback
-                res_lo, res_hi = -8.0, -1.0
+                res_lo, res_hi = -20.0, 10.0
 
             if not (res_lo < residual < res_hi):
                 print(f"  [!] {out_path.name}: residual={residual:.2f} eV/atom "
-                      f"(allowed {res_lo} to {res_hi}) — skipping"
-                      f"You can change these in line 1449")
+                      f"(allowed {res_lo} to {res_hi}) — skipping")
                 parse_failed += 1
                 continue
 
-            # ── Parse forces ──────────────────────────────────────────────────
+            # Parse forces
             force_block = re.search(
                 r"ATOMIC FORCES in \[a\.u\.\](.*?)SUM OF ATOMIC FORCES",
                 out_content, re.DOTALL
@@ -1797,7 +1874,7 @@ def parse_all_cp2k_outputs(target_round=None):
                 else:
                     print(f"  [!] Force count mismatch in {out_path.name}: "
                           f"got {len(forces)}, expected {len(atoms)}")
-
+            
             # Attach metadata
             atoms.info["REF_energy"] = energy_eV
             atoms.info["al_round"]   = round_num
@@ -1815,6 +1892,9 @@ def parse_all_cp2k_outputs(target_round=None):
                 atoms.info["forces_missing"] = True
             atoms.calc = None
             
+            force_mags = np.linalg.norm(forces, axis=1)
+    
+            max_f = np.max(force_mags)
             # Accept
             new_frames.append(atoms)
             pool_hashes.add(geom_hash)
@@ -1822,8 +1902,17 @@ def parse_all_cp2k_outputs(target_round=None):
             print(f"  [+] {stem}  "
                   f"E={energy_eV:.4f} eV  "
                   f"residual={residual:.3f} eV/atom  "
-                  f"forces={'ok' if forces_ok else 'MISSING'}  "
+                  f"forces={f'ok max={max_f:.3f}' if forces_ok else 'MISSING'}  "
+                  f"stress={f'ok' if 'REF_stress' in atoms.info else 'MISSING'}  "
                   f"natoms={len(atoms)}")
+
+        # Per-round summary (helps diagnose why frames were skipped)
+        n_accepted = len(new_frames)  # cumulative; approximate for round summary
+        print(f"  [→] Round {round_num} summary: "
+              f"symlinks={n_symlinks}  incomplete={n_incomplete}  "
+              f"excluded={n_excluded}  duplicates={n_dup}  "
+              f"too_large={n_too_large}  parse_failed={parse_failed}  "
+              f"new_this_round≈{len(new_frames)}")
 
     # ----------------------------------------------------------------
     # Step 4 — Write results
@@ -1971,7 +2060,9 @@ if __name__ == "__main__":
     elif args.reparse:
         reparse_failed()          
     elif args.parse_all:
-        parse_all_cp2k_outputs(target_round=args.target)
+        # --parse-all 4  sets round_num=4; --parse-all --target 4 also works
+        target = args.target if args.target is not None else args.round_num
+        parse_all_cp2k_outputs(target_round=target)
     elif args.parse:
         parse_and_update()        
     else:

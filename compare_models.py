@@ -481,13 +481,34 @@ def print_and_save_summary(all_metrics, labels, outdir):
 # Held-out set helper
 # ==============================================================================
 
-def create_held_out_set(pool_file="training_clean.xyz",
-                        held_out_file="held_out.xyz",
-                        n=100, seed=42):
+def create_held_out_set(
+    pool_file="master_train_pool.xyz",
+    held_out_file="held_out.xyz",
+    cleaned_pool_file="training_clean.xyz",
+    n=50,
+    seed=42,
+):
     """
-    Stratified sample from the pool — ~equal frames per system_type.
-    Call ONCE after round 1. Never add these frames to the training pool.
+    Stratified sample from the raw pool BEFORE cleaning/training.
+    Removes held-out frames from the pool so they never enter training.
+    
+    Call ONCE before round 1, or before round 5 if starting fresh.
+    Never call again — the guard clause prevents overwriting.
+
+    Args:
+        pool_file:         Source of all DFT frames (master pool).
+        held_out_file:     Where to write the held-out frames.
+        cleaned_pool_file: The file passed to MACE training — held-out
+                           frames are excluded from this.
+        n:                 Total held-out frames to draw.
+        seed:              Random seed for reproducibility.
     """
+    # ----------------------------------------------------------------
+    # Guard: never overwrite an existing held-out set
+    # ----------------------------------------------------------------
+    from collections import defaultdict
+    import random
+
     if os.path.exists(held_out_file):
         print(f"[!] {held_out_file} already exists — not overwriting.")
         print(f"    Delete it manually if you want to recreate it.")
@@ -497,28 +518,65 @@ def create_held_out_set(pool_file="training_clean.xyz",
         print(f"[X] Pool file not found: {pool_file}")
         return
 
-    from collections import defaultdict
-    import random
     random.seed(seed)
 
-    frames     = read(pool_file, index=":")
-    by_system  = defaultdict(list)
-    for atoms in frames:
-        by_system[atoms.info.get("system_type", "unknown")].append(atoms)
+    # ----------------------------------------------------------------
+    # Load and stratify by system_type
+    # ----------------------------------------------------------------
+    all_frames = read(pool_file, index=":")
+    
+    # Tag each frame with its index so we can exclude them later
+    for i, atoms in enumerate(all_frames):
+        atoms.info["_pool_index"] = i
 
-    n_systems   = len(by_system)
-    per_system  = max(1, n // n_systems)
-    held_out    = []
-    for sys_name, sys_frames in by_system.items():
+    by_system = defaultdict(list)
+    for atoms in all_frames:
+        key = atoms.info.get("system_type", "unknown")
+        by_system[key].append(atoms)
+
+    # ----------------------------------------------------------------
+    # Stratified sampling — equal budget per system type
+    # ----------------------------------------------------------------
+    n_systems  = len(by_system)
+    per_system = max(1, n // n_systems)
+    
+    held_out      = []
+    held_out_idxs = set()
+
+    for sys_name, sys_frames in sorted(by_system.items()):
         k = min(per_system, len(sys_frames))
         chosen = random.sample(sys_frames, k)
         held_out.extend(chosen)
-        print(f"  {sys_name}: {k} frames selected")
+        held_out_idxs.update(a.info["_pool_index"] for a in chosen)
+        print(f"  [{sys_name}]  {k}/{len(sys_frames)} frames selected for held-out")
 
+    # ----------------------------------------------------------------
+    # Write held-out set
+    # ----------------------------------------------------------------
     write(held_out_file, held_out, format="extxyz")
-    print(f"\n[+] Held-out set: {held_out_file}  "
-          f"({len(held_out)} frames, {n_systems} systems)")
-    print(f"    Do NOT add these frames to master_train_pool.xyz")
+    print(f"\n[+] Held-out set written: {held_out_file}  "
+          f"({len(held_out)} frames across {n_systems} system types)")
+
+    # ----------------------------------------------------------------
+    # Write the training pool with held-out frames REMOVED
+    # ----------------------------------------------------------------
+    training_frames = [
+        a for a in all_frames
+        if a.info["_pool_index"] not in held_out_idxs
+    ]
+
+    # Clean up the temporary index tag before writing
+    for atoms in training_frames:
+        atoms.info.pop("_pool_index", None)
+    for atoms in held_out:
+        atoms.info.pop("_pool_index", None)
+
+    write(cleaned_pool_file, training_frames, format="extxyz")
+    print(f"[+] Training pool written: {cleaned_pool_file}  "
+          f"({len(training_frames)} frames, held-out excluded)")
+    print(f"\n[!] IMPORTANT: Add new DFT frames to {pool_file} each round,")
+    print(f"    then re-run your cleaning pipeline — held-out frames will")
+    print(f"    be automatically excluded via the index guard.")
 
 # ==============================================================================
 # Main

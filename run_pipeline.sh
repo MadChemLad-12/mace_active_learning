@@ -80,6 +80,7 @@ run_training_round() {
     # Bugged atm
     #echo "Checking dataset compusition"
     #python ${MACE_PATH}active_learning/pool_coverage.py
+    python ${MACE_PATH}active_learning/compare_models_e0s.py --make-held-out
 
     echo
     echo "Retraining MACE model..."
@@ -91,9 +92,8 @@ run_training_round() {
     # Step 6: Compare
     if [ "$COMPARE_MODELS" = "True" ]; then
         echo comparing models and analyzing results...
-        python ${MACE_PATH}active_learning/compare_models_e0s.py --make-held-out
-        python ${MACE_PATH}active_learning/compare_models_e0s.py --outdir comparison_results_val --test fps_validate_framesV1.xyz --models $FOUNDATION $MACE_OSAKA mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model V1.1/mace_V1_active_learning_stagetwo.model
-        python ${MACE_PATH}active_learning/compare_models_e0s.py --outdir comparison_results --test held_out.xyz --models $FOUNDATION $MACE_OSAKA mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model V1.1/mace_V1_active_learning_stagetwo.model
+        python ${MACE_PATH}active_learning/compare_models_e0s.py --outdir comparison_results_val --test fps_validate_frames_corrected.xyz --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model V1.1/mace_V1_active_learning_stagetwo.model
+        python ${MACE_PATH}active_learning/compare_models_e0s.py --outdir comparison_results --test held_out.xyz --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model V1.1/mace_V1_active_learning_stagetwo.model
         big_gap
     fi  
 

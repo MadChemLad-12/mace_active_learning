@@ -35,9 +35,10 @@ from ase.units import Hartree, Bohr, eV, Angstrom
 from sklearn.preprocessing import normalize
 
 # Import functions and configurations from your active learning pipeline ecosystem
-from active_pipeline import (
+from active_pipeline  import (
     write_cp2k_sp, ROUND, POOL_FILE, CP2K_TIMEOUT,
-    parse_cell_from_out, parse_positions_from_out, _write_submission_script
+    parse_cell_from_out, parse_positions_from_out, 
+    _write_submission_script, parse_stress_from_out
 )
 
 HASH_PRECISION = 4
@@ -82,6 +83,7 @@ def force_insert_cp2k_output(out_file_path, destination="master"):
     the master_train_pool.xyz or training_clean.xyz file, bypassing step checks.
     """
     from mace.calculators import MACECalculator
+    from ase import Atoms
 
     out_path = Path(out_file_path)
     if not out_path.exists():
@@ -90,33 +92,76 @@ def force_insert_cp2k_output(out_file_path, destination="master"):
 
     print(f"\n[→] Manually parsing {out_path.name} for direct injection into: {destination.upper()}")
 
-    # 1. Parse raw CP2K details using active_pipeline's parser machinery
     try:
         content = out_path.read_text()
+        
+        if "SCF run NOT converged" in content:
+            print(f"  [✗] Failed to parse: SCF did not converge.")
+            return
+
+        # 1. Parse Structure Matrix using your active_pipeline machinery
         cell_matrix = parse_cell_from_out(content)
         symbols, positions = parse_positions_from_out(content)
-        energy, forces = parse_energy_forces(content)
         
-        if any(v is None for v in [cell_matrix, symbols, positions, energy, forces]):
-            print(f"  [✗] Failed to parse: File might be incomplete, crashed, or missing coordinates/forces.")
+        if cell_matrix is None or symbols is None or positions is None:
+            print(f"  [✗] Structural geometries missing from output file.")
             return
+
+        # Create basic Atoms object framework
+        atoms = Atoms(symbols=symbols, positions=positions, cell=cell_matrix, pbc=True)
+
+        # 2. Extract Energy using exact float matching
+        energy_match = re.search(r"ENERGY\| Total FORCE_EVAL \( QS \) energy \[a\.u\.\]:\s+([-\d.]+)", content)
+        if not energy_match:
+            print(f"  [✗] Energy data not found.")
+            return
+        
+        # Note: Replace 'HA_TO_EV' with 'Hartree' if your script imports Hartree from ase.units
+        atoms.info["REF_energy"] = float(energy_match.group(1)) * Hartree
+
+        # 3. Extract Forces using your exact column filtering rule (len(parts) == 6)
+        force_block = re.search(r"ATOMIC FORCES in \[a\.u\.\](.*?)SUM OF ATOMIC FORCES", content, re.DOTALL)
+        forces_ok = False
+        if force_block:
+            force_lines = force_block.group(1).strip().split("\n")
+            forces = []
+            for line in force_lines:
+                parts = line.split()
+                if len(parts) == 6:  # Handles header removal natively!
+                    # Note: Replace 'HA_BOHR_TO_EV_ANG' with 'Hartree / Bohr' if using ase.units conversions
+                    fx = float(parts[3]) * (Hartree / Bohr)
+                    fy = float(parts[4]) * (Hartree / Bohr)
+                    fz = float(parts[5]) * (Hartree / Bohr)
+                    forces.append([fx, fy, fz])
+
+            if len(forces) == len(atoms):
+                atoms.arrays["REF_forces"] = np.array(forces)
+                forces_ok = True
+            else:
+                print(f"  [!] Force row mismatch: read {len(forces)}, expected {len(atoms)} lines.")
+
+        if not forces_ok:
+            print(f"  [✗] Failed to validate force matrices. Skipping injection.")
+            return
+
+        # 4. Extract Stress Tensor and convert to Voigt order
+        stress = parse_stress_from_out(content) if 'parse_stress_from_out' in globals() else None
+        if stress is not None:
+            voigt = stress[[0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]]
+            atoms.info["REF_stress"] = voigt
+
     except Exception as e:
         print(f"  [✗] Error reading or parsing output text matrix: {e}")
         return
 
-    # 2. Reconstruct the ASE Atoms framework with reference properties attached
-    from ase import Atoms
-    atoms = Atoms(symbols=symbols, positions=positions, cell=cell_matrix, pbc=True)
-    atoms.info["REF_energy"] = energy
-    atoms.array["REF_forces"] = forces
-    
     # Extract metadata properties from filename conventions
-    # e.g., sp_Dry0.375PtOH_r4_0004 -> Dry0.375PtOH
     stem_match = re.search(r"sp_(.*?)_r\d+_", out_path.stem)
     system_tag = stem_match.group(1) if stem_match else "forced_insertion"
     atoms.info["system_type"] = system_tag
+    atoms.info["al_round"] = ROUND
+    atoms.info["source"] = "cp2k_sp"
 
-    # 3. Check for exact duplicate geometry entries in target file before appending
+    # Check for exact duplicate geometry entries in target file before appending
     target_file = "master_train_pool.xyz" if destination == "master" else "training_clean.xyz"
     new_hash = get_atoms_hash(atoms)
     
@@ -130,24 +175,20 @@ def force_insert_cp2k_output(out_file_path, destination="master"):
         except:
             pass
 
-    # 4. Handle structural validation layer required specifically for training clean records
+    # Handle structural validation layer required specifically for training clean records
     if destination == "clean":
         print("  [→] Aligning MACE baseline residuals for training compatibility...")
-        from active_pipline import MODEL_PATH
+        from active_pipeline import MODEL_PATH
         try:
-            # Initialize calculator to append energy/force predictions required by training loaders
             calc = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
             atoms_copy = atoms.copy()
             atoms_copy.calc = calc
-            
-            # Populate evaluated properties back onto info/arrays dictionaries
             atoms.info["MACE_energy"] = atoms_copy.get_potential_energy()
             atoms.array["MACE_forces"] = atoms_copy.get_forces()
         except Exception as e:
             print(f"  [!] Warning: Could not initialize MACE calculator layers: {e}")
-            print(f"      Attempting basic append without model prediction properties...")
 
-    # 5. Append directly to destination file
+    # Append directly to destination file
     try:
         write(target_file, atoms, format="extxyz", append=True)
         print(f"  [✓] Successfully forced and appended structure into {target_file}")
@@ -269,6 +310,16 @@ def track_and_recover_structures(file_path, force_cp2k=False, n_fps_frames=3):
                             
             print(f"    [+✓] Forced CP2K input written: {inp_path}")
 
+def resolve_out_files(path_list):
+        expanded = []
+        for p in path_list:
+            path_obj = Path(p)
+            if path_obj.is_dir():
+                # Recursively finds all .out files inside the folder and sorts them
+                expanded.extend([str(f) for f in sorted(path_obj.rglob("*.out"))])
+            else:
+                expanded.append(p)
+        return expanded
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-file/NEB path pipeline tracking script.")
