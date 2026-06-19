@@ -1,8 +1,5 @@
 #!/usr/bin/bash
-
-#Define base path at top
-#Change to your path
-export MACE_PATH="/home/user/Documents/Programs/For_GIT/MACE_CP2K_pipeline/"
+source "$(dirname "$(realpath "$0")")/config.local.sh"
 
 big_gap() {
     echo -e "\n\n\n\n"
@@ -17,8 +14,7 @@ run_training_round() {
     # Internal timing/naming
     local TIMESTAMP=$(date +%Y%m%d_%H%M%S)
     local START_TIME=$(date +%s)
-    # FIX: Only set fallback models if they aren't already explicitly set
-    [ -z "$FOUNDATION" ] && FOUNDATION="${MACE_PATH}mace-mp-0b3-medium-float32.model"
+    [ -z "$FOUNDATION" ] && FOUNDATION="${MACE_FOUNDATION_MODEL}"
     local MACE_OSAKA="${MACE_PATH}mace-osaka24-medium_float32.model"
     local NEW_MODEL="mace_V${ROUND}_active_learning_final.model"
 
@@ -32,6 +28,7 @@ run_training_round() {
     [ "$SKIP_OPT" = "True" ] && NEB_ARGS+=(--skip-opt)
     [ "$SKIP_NEB" = "True" ] && NEB_ARGS+=(--skip-neb)
     [ "$SKIP_PLM" = "True" ] && NEB_ARGS+=(--skip-plumed)
+    [ "$SKIP_AIMD" = "True" ] && NEB_ARGS+=(--skip-aimd)    
     # Step 1: geo-opt + NEB
     if [ "$GEO_OPT_RUN" = "True" ]; then
         echo "Running geometry optimizations and NEB..."
@@ -42,7 +39,6 @@ run_training_round() {
 
     # Step 2: select frames
     PIPE_ARGS=()
-    [ "$DISSOLVED" = "True" ] && PIPE_ARGS+=(--dissolve)
     [ -n "$EXCLUDE_KEYWORDS" ] && PIPE_ARGS+=(--exclude $EXCLUDE_KEYWORDS)
 
     if [ "$PIPELINE_RUN" = "True" ]; then
@@ -61,14 +57,14 @@ run_training_round() {
         bash "${MACE_PATH}active_learning/cp2k_sp_round${ROUND}/submit_missing.sh"
         
         echo "Moving CP2K restart files..."
-        mv *.wfn.bak-1 ${MACE_PATH}active_learning/RESTART 2>/dev/null
-        mv *.wfn ${MACE_PATH}active_learning/RESTART 2>/dev/null
+        rm *.wfn.bak-1 ${MACE_PATH}active_learning/RESTART 2>/dev/null
+        rm *.wfn ${MACE_PATH}active_learning/RESTART 2>/dev/null
         big_gap
     fi
 
     # Step 4: parse DFT & Build Data
     echo "Parsing DFT results for round $ROUND..."
-    python ${MACE_PATH}active_learning/active_pipeline.py --parse-all $ROUND
+    python ${MACE_PATH}active_learning/active_pipeline.py --parse-all
     cp master_train_pool.xyz "master_train_pool_${ROUND}_backup.xyz"
 
     echo
@@ -112,77 +108,20 @@ R=1
 EXCLUDE_KEYWORDS=""   # set to "" to disable
 GEO_OPT_RUN="True"   
 SKIP_OPT="True"
-SKIP_NEB="False"
+SKIP_NEB="True"
+SKIP_AIMD="True"
 SKIP_PLM="False" ### Plumed isnt really what I was looking for?
         
-PIPELINE_RUN="False"
-DISSOLVED="False"
+PIPELINE_RUN="True"
 
 TRAINING_PATH="training_clean.xyz"
-FOUNDATION="${MACE_PATH}mace-mp-0b3-medium-float32.model"
+FOUNDATION="${MACE_FOUNDATION_MODEL}"
 
 CP2K_RUN="True"
-RUNS="50"
+RUNS="10"
 COMPARE_MODELS="True"
 
 echo "Starting Round $R. Logging to pipeline_$R.log"
 run_training_round $R 2>&1 | tee "pipeline_$R.log"
 
 exit 0
-
-### Main Execution Loop
-for R in {3..4}; do
-    # --- SETUP CONFIGURATION FOR THIS ROUND ---
-    if [ "$R" -eq 3 ]; then
-        GEO_OPT_RUN="True"   # Turn off for Round 1
-        SKIP_OPT="False"
-        SKIP_NEB="True"
-        SKIP_PLM="True"
-        
-        PIPELINE_RUN="True"
-        DISSOLVED="True"
-
-        TRAINING_PATH=""
-        FOUNDATION="${MACE_PATH}mace-mp-0b3-medium-float32.model"
-
-        CP2K_RUN="True"
-        RUNS="150"
-        COMPARE_MODELS="True"
-
-    elif [ "$R" -eq 4 ]; then
-        GEO_OPT_RUN="True"   # Turn on for Round 2
-        SKIP_OPT="False"
-        SKIP_NEB="False"
-        SKIP_PLM="False"
-
-        PIPELINE_RUN="True"
-        DISSOLVED="False"
-        
-        TRAINING_PATH=""
-        FOUNDATION=""
-
-        CP2K_RUN="True"
-        RUNS="200"
-        COMPARE_MODELS="False"
-
-    else
-        GEO_OPT_RUN="False"    # Turn on for Round 3 and above
-        SKIP_OPT="True"
-        SKIP_NEB="True"
-        SKIP_PLM="True"
-
-        PIPELINE_RUN="True"
-        DISSOLVED="True"
-        
-        TRAINING_PATH=""
-        FOUNDATION=""
-
-        CP2K_RUN="True"
-        RUNS="60"
-        COMPARE_MODELS="True"
-    fi
-    # ------------------------------------------
-    echo "Starting Round $R. Logging to pipeline_$R.log"
-    run_training_round $R 2>&1 | tee "pipeline_$R.log"
-done
-echo "All finished"

@@ -54,20 +54,18 @@ from mace.calculators import MACECalculator
 # ── Models ────────────────────────────────────────────────────────────────────
 MODELS = {
     "foundational": {
-        "path":  "/home/user/Documents/Programs/Python/ASE/MACE/mace-mp-0b3-medium-float32.model",
-        "label": "MACE-MP-0b3",           # short label for plots / filenames
-        "color": "#2196F3",               # blue
+        "path":  os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model"),
+        "label": "MACE-MP-0b3",
+        "color": "#2196F3",
     },
     "finetuned": {
-        "path":  "/home/user/Documents/Programs/Python/ASE/MACE/active_learning/mace_V4_active_learning_stagetwo.model",
-        "label": "MACE-V4",               # short label for plots / filenames
-        "color": "#F44336",               # red
+        "path":  os.environ.get("MACE_FINETUNED_MODEL", "mace_V4_active_learning_stagetwo.model"),
+        "label": "MACE-V4",
+        "color": "#F44336",
     },
 }
-
-# ── Paths ─────────────────────────────────────────────────────────────────────
-PATH_CSV    = "/home/user/Documents/Models/Simulations/MACE/neb/Pt_Diss_Neb_test.csv"
-OUTPUT_ROOT = "neb_comparison"            # root output dir; sub-dirs per model
+PATH_CSV    = os.environ.get("MACE_NEB_CSV", "Pt_Diss_Neb_test.csv")
+OUTPUT_ROOT = os.environ.get("MACE_NEB_OUTPUT", "neb_comparison")
 
 # ── Device ────────────────────────────────────────────────────────────────────
 DEVICE = "cuda"

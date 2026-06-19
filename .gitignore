@@ -46,6 +46,7 @@ geo_opt_results/
 cp2k_sp_round*/
 cp2k_e0_round*/
 geometry_index_global.json
+test_round1.csv
 
 # ─── Figures and plots ────────────────────────────────────
 comparison_results/
@@ -63,3 +64,5 @@ train_V*_*.log
 .idea/
 .vscode/
 *.swp
+config.local.sh
+*.sif

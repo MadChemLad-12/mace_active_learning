@@ -11,9 +11,10 @@ import json
 #E0s = {1: -12.6294, 6: -146.3745, 8: -431.6014, 
 #       9: -656.5253, 16: -274.7039, 78: -3264.7049}
 
-MAX_FORCE_REF = 25.0   # eV/Å
-MAX_RMSE      = 600    # meV/Å
+MAX_FORCE_REF = 12.0   # eV/Å
+MAX_RMSE      = 1000    # meV/Å
 NON_PT_THRESH = 5.3
+EXTERNAL_SYSTEM_TYPES = ("mptrj", "oc25", "reico")
 
 E0_JSON = "E0s.json"
 try:
@@ -111,7 +112,9 @@ for index, atoms in enumerate(unique_frames):
     # ── 1. Non-Pt z-coordinate check ─────────────────────────────────────────
     is_not_pt = (np.array(symbols_list) != "Pt")
     non_pt_z  = positions[is_not_pt, 2]
-    is_slab = pt_count > 3
+
+    is_external = any(tag in stype.lower() for tag in EXTERNAL_SYSTEM_TYPES)
+    is_slab = (pt_count > 3) and not is_external
 
     if is_slab:
         # Generic slab check: look for any non-Pt atom buried below the slab surface.
@@ -131,15 +134,15 @@ for index, atoms in enumerate(unique_frames):
     coh      = (e_total - e_ref) / len(atoms)
 
     if   "Pt" in symbols_set and pt_count > 3:          # Pt slab
-        coh_lo, coh_hi = -8.0, -3.0
+        coh_lo, coh_hi = -7.0, 0.5
     elif "Pt" in symbols_set and pt_count <= 3:          # dissolved Pt
-        coh_lo, coh_hi = -8.0, -0.0
+        coh_lo, coh_hi = -7.0, 0.5
     elif any(s in symbols_set for s in ("F", "S", "C")): # Nafion-containing
-        coh_lo, coh_hi = -8.0, -1.0
+        coh_lo, coh_hi = -7.0, 0.5
     elif symbols_set <= {"H", "O"}:                      # bulk water
-        coh_lo, coh_hi = -6.0, -1.0
+        coh_lo, coh_hi = -6.0, 0.5
     else:                                                 # fallback
-        coh_lo, coh_hi = -8.0, -1.0
+        coh_lo, coh_hi = -7.0, 0.5
 
     if not (coh_lo < coh < coh_hi):
         bad.append(atoms)
@@ -161,13 +164,17 @@ for index, atoms in enumerate(unique_frames):
     atoms_copy = atoms.copy()
     atoms_copy.calc = calc
     mace_f   = atoms_copy.get_forces()
+    if np.isnan(mace_f).any():
+        bad.append(atoms)
+        bad_info.append(f"[mace_nan_forces] {stype} index={index} MACE returned NaN forces.")
+        continue
     rmse     = np.sqrt(np.mean((mace_f - ref_f)**2)) * 1000
     max_mace = np.max(np.linalg.norm(mace_f, axis=1))
 
     if   "Pt" in symbols_set and pt_count > 3:           # Pt slab
-        rmse_thresh = 600
-    elif symbols_set <= {"H", "O"}:                      # bulk water
         rmse_thresh = 1000
+    elif symbols_set <= {"H", "O"}:                      # bulk water
+        rmse_thresh = 600
     elif any(s in symbols_set for s in ("F", "S")):      # Nafion
         rmse_thresh = 1000
     else:                                                 # dissolved Pt / fallback

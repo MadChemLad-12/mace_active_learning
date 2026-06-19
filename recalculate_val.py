@@ -64,7 +64,6 @@ JOB_PREFIX    = "val"
 # from your training rounds and never accidentally merged
 VAL_ROUND_TAG = "val"
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  STEP 1 — Write CP2K inputs
 # ─────────────────────────────────────────────────────────────────────────────

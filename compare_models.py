@@ -172,7 +172,7 @@ def evaluate_model(model_path, test_frames, device="cuda", dtype="float32",
     calc = MACECalculator(
         model_paths=model_path,
         device=device,
-        default_dtype=dtype,
+        default_dtype=dtype
     )
 
     pred_e, ref_e = [], []

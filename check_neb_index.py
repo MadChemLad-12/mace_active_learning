@@ -23,12 +23,12 @@ import argparse
 import csv
 import sys
 from pathlib import Path
-
+import os
 import numpy as np
 from ase.io import read
 
 # ── Default CSV path — same as neb_geo_run.py ────────────────────────────────
-DEFAULT_CSV = "/home/user/Documents/Programs/Python/ASE/MACE/active_learning/PtDIssNeb.csv"
+DEFAULT_CSV = os.environ.get("MACE_DEFAULT_CSV", "PtDissNeb.csv")
 
 # ── Colours for terminal output ───────────────────────────────────────────────
 GREEN  = "\033[92m"

@@ -54,17 +54,17 @@ from ase.geometry import find_mic
 from scipy.spatial import cKDTree
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 # ==============================================================================
 # SETTINGS — CHANGE THESE
 # ==============================================================================
-
-MACE_MODEL_PATH = "mace-mp-0b3-medium-float32.model"
+MACE_MODEL_PATH = os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model")
 DEVICE          = "cuda"                     # "cuda" or "cpu"
 DTYPE           = "float32"                  # Match your model's dtype
 NODES           = 6                          # For parallel processing (if used)
 OUTPUT_DIR      = "geo_opt_results"          # Where to save optimised structures
-PATH_CSV        = "configs.csv"
+PATH_CSV = os.environ.get("MACE_DEFAULT_CSV", "configs.csv")
 
 # Geometry optimisation settings
 FMAX            = 0.05     # Force convergence threshold (eV/Å)

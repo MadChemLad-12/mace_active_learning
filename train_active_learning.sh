@@ -106,7 +106,7 @@ done
 # Logic: If Round 1, use base mace-mp. If Round > 1, use 'final.model' from Round-1
 if [[ -z "$FOUNDATION" ]]; then
     if [[ "$ROUND" -eq 1 ]]; then
-        FOUNDATION="mace-mp-0b3-medium-float32.model"
+        FOUNDATION="${MACE_FOUNDATION_MODEL}" 
         log_info "Round 1: Using Foundational MACE-MP model."
     else
         PREV_ROUND=$((ROUND - 1))
@@ -125,7 +125,7 @@ fi
 # Training data produced by active_pipeline.py --parse
 # Change to master train pool round 2 and onwards.
 if [[ -z "$TRAINING_PATH" ]]; then
-    TRAINING_PATH="training_clean.xyz"
+    TRAINING_PATH="${MACE_TRAINING_PATH}"
 fi
 
 
@@ -133,17 +133,18 @@ fi
 # training, used to track model quality across rounds.
 # If you don't have one yet, point this at master_train_pool.xyz as a proxy
 # and create a proper held-out set after round 1.
-EVAL_CONFIGS="${EVAL_CONFIGS:-fps_validate_framesV1.xyz}"
+EVAL_CONFIGS="${EVAL_CONFIGS}"
 
 # Training hyperparameters
 VALIDATION_FRACTION=0.1
 BATCH_SIZE=4
 LR=0.0001
-MAX_EPOCHS=400
-SWA_START=300
-PATIENCE=30
-R_MAX=6.0
+MAX_EPOCHS=500
+SWA_START=430
+PATIENCE=70
+R_MAX=5.0
 NUM_SAMPLES_PT=1200   # Materials Project frames to mix in during multi-head training
+FLOAT_TYPE="float32"
 
 # Elements present across ALL your systems (atomic numbers)
 # H=1, C=6, O=8, F=9, S=16, Pt=78
@@ -169,7 +170,7 @@ E0_VALUES="{
 # E0_VALUES=$(python3 -c "import json; print(json.load(open('E0s.json')))" 2>/dev/null)
 
 # Path to parity plot script
-PARITY_SCRIPT="${PARITY_SCRIPT:-plot_parity.py}"
+PARITY_SCRIPT="plot_parity.py"
 
 # =============================================================================
 # DERIVED PATHS — do not edit
@@ -232,13 +233,14 @@ mace_run_train \
     --foundation_model="$FOUNDATION" \
     --train_file="$TRAINING_PATH" \
     --valid_fraction="$VALIDATION_FRACTION" \
-    --default_dtype="float32" \
+    --test_file="$EVAL_CONFIGS" \
+    --default_dtype="$FLOAT_TYPE" \
     --energy_key="REF_energy" \
     --forces_key="REF_forces" \
     --atomic_numbers="$ATOMIC_NUMBERS" \
     --E0s="$E0_VALUES" \
     --model="MACE" \
-    --forces_weight=1000 \
+    --forces_weight=100 \
     --energy_weight=1 \
     --stress_weight=0 \
     --r_max="$R_MAX" \
@@ -250,12 +252,14 @@ mace_run_train \
     --patience="$PATIENCE" \
     --swa \
     --start_swa "$SWA_START" \
-    --swa_energy_weight=10 \
-    --swa_forces_weight=500 \
+    --swa_energy_weight=5 \
+    --swa_forces_weight=100 \
     --swa_stress_weight=0 \
     --multiheads_finetuning=True \
     --pt_train_file="mp" \
     --num_samples_pt="$NUM_SAMPLES_PT" \
+    --num_workers=4 \
+    --pin_memory=True \
     --device=cuda 
 
 train_exit=${PIPESTATUS[0]}
@@ -307,10 +311,10 @@ else
     log_info "Evaluating $FINAL_MODEL on $EVAL_CONFIGS"
 
     mace_eval_configs \
-        --model $FINAL_MODEL \
-        --configs $EVAL_CONFIGS \
-        --output $EVAL_OUTPUT \
-        --default_dtype float32 \
+        --model "$FINAL_MODEL" \
+        --configs "$EVAL_CONFIGS" \
+        --output "$EVAL_OUTPUT" \
+        --default_dtype "$FLOAT_TYPE" \
         --batch_size 2 \
         --device cuda \
         2>&1 | tee -a "$TRAIN_LOG"

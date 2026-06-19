@@ -52,8 +52,9 @@ from ase.units import Hartree, Bohr
 # ============================================================
 
 ROUND       = 1          # Increment each iteration
-MODEL_PATH  = (f"mace_V{ROUND-1}_active_learning_stagetwo.model" if ROUND > 3
-               else "/home/user/Documents/Programs/Python/ASE/MACE/mace-mp-0b3-medium-float32.model")
+_FOUNDATION_MODEL = os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model")
+MODEL_PATH = (f"mace_V{ROUND-1}_active_learning_stagetwo.model" if ROUND > 3
+              else _FOUNDATION_MODEL)
 
 # Where neb_geo_run.py wrote its AL candidate files
 AL_INPUT_DIR  = "geo_opt_results/al_candidates"
@@ -78,8 +79,43 @@ def apply_round(n):
     print(f"[→] Round {n}  |  Model: {MODEL_PATH}  |  CP2K dir: {CP2K_DIR}")
 
 
-# Force magnitude threshold: frames above this are always considered uncertain
-FORCE_THRESHOLD = 0.5   # eV/Å
+
+# --- Pathological-geometry triage before CP2K ---
+# If a candidate's *initial* MACE force exceeds this, it's far more likely to
+# be an overlap/clash artifact (e.g. raw FPS pick from a foreign dataset's
+# cell) than a genuinely interesting AL frame. We run a short, CAPPED
+# relaxation to remove the overlap -- not a full optimisation, since fully
+# converging would erase the very off-equilibrium character that makes a
+# frame worth sending to CP2K in the first place.
+GEOOPT_TRIGGER       = True   # Turns this feature on or off
+GEOOPT_TRIGGER_FORCE = 20.0   # eV/Å -- well above FORCE_THRESHOLD; this flags "broken", not "uncertain"
+GEOOPT_MAX_STEPS     = 30     # hard cap -- keep this cheap and avoid fully annealing the frame
+GEOOPT_FMAX_TARGET   = 2.0    # eV/Å -- loose target: "no longer exploding", not "converged minimum"
+
+EXTERNAL_DATASETS = False  # add this to your config flags at the top
+
+EXTERNAL_SOURCES = {
+    "mptrj_pt": {
+        "path": "training_data/mptrj-gga-ggapu/master_ranked_MPtrj_structures.extxyz",
+        "n_samples": 30,   # only 35 frames total — take most of them
+    },
+    "oc25_pt": {
+        "path": "hugface_data/train/master_ranked_OC25_structures.extxyz",
+        "n_samples": 90,   # 93 frames total — sample ~30
+    },
+}
+
+REICO_SAMPLEING = True
+# --- REICO (random imaginary-chemical box) sampling config ---
+REICO_NUM            = 100     # number of random boxes generated per round
+REICO_MIN_ATOMS      = 20
+REICO_MAX_ATOMS      = 50
+REICO_VOL_PER_ATOM   = 16.0   # Å³/atom -- rough condensed-phase packing density,
+                               # box edge is derived from this + n_atoms so boxes
+                               # stay dense rather than dilute-gas-like
+REICO_MIN_DIST_SCALE = 0.6    # scales (covalent_radius_a + covalent_radius_b) to
+                               # get a per-pair minimum distance, instead of one
+                               # global cutoff that's wrong for both H-H and Pt-Pt
 
 # Output paths
 CP2K_DIR   = f"cp2k_sp_round{ROUND}"
@@ -289,9 +325,7 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
 # ============================================================
 # Step 3 — CP2K single-point input generation
 # ============================================================
-LIBDIR = "path/to/cp2klib"  # Set CP2K_LIBDIR env var or edit this
-if LIBDIR == "path/to/cp2klib":
-    print(f"This job will fail as cp2k will not find CP2K Library for potentials")
+LIBDIR = os.environ.get("CP2K_LIBDIR", "path/to/cp2klib")
 
 CP2K_TEMPLATE = """\
 &GLOBAL
@@ -1268,6 +1302,138 @@ def is_physically_reasonable(atoms, calc, round_num=1):
     return True, "ok"
 
 # ============================================================
+# Pre-CP2K triage: capped relaxation for pathological initial forces
+# ============================================================
+def relax_pathological_frames(frames, calc, trigger_force=GEOOPT_TRIGGER_FORCE,
+                               max_steps=GEOOPT_MAX_STEPS, fmax_target=GEOOPT_FMAX_TARGET):
+    """
+    For any frame whose initial MACE force magnitude exceeds `trigger_force`,
+    run a short, CAPPED relaxation to remove pathological overlaps/clashes
+    before paying for a CP2K single-point.
+
+    This is deliberately NOT a full optimisation:
+      - max_steps caps how far the geometry can move
+      - fmax_target is loose (eV/Å, not meV/Å) -- we're aiming for
+        "no longer exploding", not "sitting in a minimum"
+    Fully converging would relax the frame toward whatever the *current*
+    model already considers low-energy, which destroys the off-equilibrium,
+    informative character that made it worth selecting in the first place.
+    Only frames that actually improve are kept relaxed; if the optimiser
+    doesn't help within the step budget, the original geometry is kept
+    as-is and flagged so you can inspect it manually.
+
+    Tags written to atoms.info: pre_relaxed, pre_relax_steps,
+    pre_relax_max_force_before, pre_relax_max_force_after.
+    """
+    from ase.optimize import FIRE
+    import numpy as np
+
+    n_triggered = 0
+    n_improved  = 0
+
+    for atoms in frames:
+        atoms_copy = atoms.copy()
+        atoms_copy.calc = calc
+        try:
+            f0 = atoms_copy.get_forces()
+        except Exception as e:
+            print(f"    [!] Triage: could not evaluate initial forces, skipping check: {e}")
+            continue
+
+        max_f0 = float(np.max(np.linalg.norm(f0, axis=1)))
+        if max_f0 <= trigger_force:
+            continue
+
+        n_triggered += 1
+        opt = FIRE(atoms_copy, logfile=None)
+        try:
+            opt.run(fmax=fmax_target, steps=max_steps)
+            f_final = atoms_copy.get_forces()
+            max_f_final = float(np.max(np.linalg.norm(f_final, axis=1)))
+        except Exception as e:
+            print(f"    [!] Triage relaxation failed for one frame, keeping original "
+                  f"geometry (initial max_f={max_f0:.2f} eV/Å): {e}")
+            atoms.info["pre_relax_failed"] = True
+            continue
+
+        if max_f_final < max_f0:
+            atoms.set_positions(atoms_copy.get_positions())
+            atoms.info["pre_relaxed"] = True
+            atoms.info["pre_relax_steps"] = int(opt.nsteps)
+            atoms.info["pre_relax_max_force_before"] = max_f0
+            atoms.info["pre_relax_max_force_after"]  = max_f_final
+            n_improved += 1
+            print(f"    [⚙] Pre-relaxed: {max_f0:.2f} → {max_f_final:.2f} eV/Å "
+                  f"in {opt.nsteps} steps  ({atoms.info.get('system_type','?')})")
+        else:
+            atoms.info["pre_relax_no_improvement"] = True
+            print(f"    [!] Triage didn't help within {max_steps} steps "
+                  f"({max_f0:.2f} → {max_f_final:.2f} eV/Å) — keeping original geometry, "
+                  f"consider rejecting this frame manually "
+                  f"({atoms.info.get('system_type','?')})")
+
+    print(f"  [✓] Pre-CP2K triage: {n_triggered} frame(s) exceeded "
+          f"{trigger_force} eV/Å, {n_improved} improved by relaxation")
+    return frames
+
+# ============================================================
+# REICO: random "imaginary chemical" box generation
+# ============================================================
+def create_random_box(elements, n_atoms, vol_per_atom=REICO_VOL_PER_ATOM,
+                       min_dist_scale=REICO_MIN_DIST_SCALE, max_attempts=300):
+    """
+    Build one small periodic box containing `n_atoms` atoms drawn with
+    repetition from `elements`. Two things matter here that a naive random
+    placement gets wrong:
+
+    1. Box volume scales with n_atoms (via vol_per_atom) so you get a dense,
+       chemically relevant local environment -- a fixed large cell mostly
+       just produces isolated atoms drifting in vacuum, which doesn't teach
+       the model anything about short-range repulsion.
+    2. The minimum allowed distance is per ELEMENT PAIR (scaled sum of
+       covalent radii), not one global number. A single global cutoff is
+       wrong in both directions: too loose for H-H, way too tight for
+       Pt-Pt (real Pt-Pt is >2.6 Å; 1.7 Å would itself be a pathological
+       clash, exactly what this whole exercise is trying to avoid creating).
+    """
+    from ase import Atoms, Atom
+    from ase.data import covalent_radii, atomic_numbers as ase_Z
+    from ase.geometry import get_distances
+
+    edge = (n_atoms * vol_per_atom) ** (1 / 3)
+    cell = [edge, edge, edge]
+    chosen = list(np.random.choice(elements, size=n_atoms))
+
+    atoms = Atoms(cell=cell, pbc=True)
+    for el in chosen:
+        placed = False
+        for _ in range(max_attempts):
+            pos = np.random.uniform(0, edge, size=3)
+            if len(atoms) == 0:
+                atoms.append(Atom(el, pos))
+                placed = True
+                break
+
+            existing_syms = atoms.get_chemical_symbols()
+            min_allowed = np.array([
+                min_dist_scale * (covalent_radii[ase_Z[el]] + covalent_radii[ase_Z[s]])
+                for s in existing_syms
+            ])
+            _, d = get_distances([pos], atoms.get_positions(), cell=atoms.get_cell(), pbc=True)
+            if np.all(d[0] >= min_allowed):
+                atoms.append(Atom(el, pos))
+                placed = True
+                break
+
+        if not placed:
+            raise ValueError(
+                f"Could not place {el} in a {edge:.1f} Å box after {max_attempts} "
+                f"attempts -- box is too small/dense for {n_atoms} atoms, try "
+                f"raising REICO_VOL_PER_ATOM"
+            )
+    return atoms
+
+# ============================================================
 # Main entry points
 # ============================================================
 from mace.calculators import MACECalculator 
@@ -1362,12 +1528,119 @@ def run_round():
     if len(selected) < N_SELECT_TOTAL:
         print(f"  [!] Warning: only found {len(selected)} new frames — "
               f"  candidate pool may be exhausted. Consider running more GeoOpts/NEBs.")
- 
+    if EXTERNAL_DATASETS:
+        print(f"\n[→] Sampling external dataset structures for CP2K recalculation...")
+
+        for src_name, src_cfg in EXTERNAL_SOURCES.items():
+            src_path = src_cfg["path"]
+            n_samples = src_cfg["n_samples"]
+
+            if not os.path.exists(src_path):
+                print(f"  [!] File not found, skipping: {src_path}")
+                continue
+
+            traj = read(src_path, index=":")
+            print(f"  [{src_name}] Loaded {len(traj)} frames from {Path(src_path).name}")
+
+            # Strip any existing calculator/energy info — CP2K will provide new labels
+            # This is critical: you don't want OC25/MPtrj energies leaking into
+            # the CP2K input or confusing the parser later
+            clean_traj = []
+            for atoms in traj:
+                atoms_clean = atoms.copy()
+                atoms_clean.calc = None
+                # Remove energy/forces keys from info so they don't 
+                # conflict with CP2K output keys
+                for key in ("energy", "forces", "stress", "corrected_total_energy",
+                            "REF_energy", "REF_forces", "REF_stress"):
+                    atoms_clean.info.pop(key, None)
+                    if key in atoms_clean.arrays:
+                        del atoms_clean.arrays[key]
+                clean_traj.append(atoms_clean)
+
+            # FPS diversity sampling — reuses your existing function
+            sampled = fps_sample_md_trajectory(clean_traj, n_samples, src_name)
+
+            # Screen for overlapping atoms / MACE force outliers, but skip
+            # Check 1.5 (the Pt-slab z-threshold) -- it assumes a slab
+            # geometry that doesn't apply to OC25/MPtrj structures.
+            screened = []
+            n_rejected = 0
+            for atoms in sampled:
+                is_ok, reason = is_physically_reasonable(
+                    atoms, calc, round_num=ROUND, check_slab_z=False
+                )
+                if is_ok:
+                    screened.append(atoms)
+                else:
+                    n_rejected += 1
+                    print(f"    [✗] {src_name}: rejected — {reason}")
+
+            selected.extend(screened)
+            print(f"  [✓] {src_name}: added {len(screened)} frames "
+                f"({n_rejected} rejected by physicality screen) "
+                f"(total selected so far: {len(selected)})")
+
+    if REICO_SAMPLEING == True:
+        print(f"\n[→] REICO: generating {REICO_NUM} random imaginary-chemical boxes...")
+        unique_elements = sorted(set(
+            sym for atoms in selected for sym in atoms.get_chemical_symbols()
+        ))
+
+        if not unique_elements:
+            print("  [!] REICO: no elements found in selected pool yet, skipping.")
+        else:
+            reico_frames = []
+            n_failed = 0
+            for _ in range(REICO_NUM):
+                n_atoms = int(np.random.randint(REICO_MIN_ATOMS, REICO_MAX_ATOMS + 1))
+                try:
+                    box = create_random_box(unique_elements, n_atoms)
+                except ValueError as e:
+                    n_failed += 1
+                    print(f"    [!] REICO: {e}")
+                    continue
+                box.info["system_type"] = "reico_random"
+                reico_frames.append(box)
+
+            print(f"  [✓] REICO: generated {len(reico_frames)}/{REICO_NUM} boxes "
+                  f"({n_failed} failed placement)")
+
+            # These start from raw random placement, so they're guaranteed
+            # to need relaxing -- trigger_force=0.0 forces it every time,
+            # with a bigger step budget than the general triage gets since
+            # they start further from anything reasonable.
+            reico_frames = relax_pathological_frames(
+                reico_frames, calc, trigger_force=0.0,
+                max_steps=60, fmax_target=GEOOPT_FMAX_TARGET
+            )
+
+            n_rejected = 0
+            for box in reico_frames:
+                is_ok, reason = is_physically_reasonable(
+                    box, calc, round_num=ROUND, check_slab_z=False
+                )
+                if is_ok:
+                    selected.append(box)
+                else:
+                    n_rejected += 1
+                    print(f"    [✗] reico_random: rejected — {reason}")
+
+            print(f"  [✓] REICO: added {len(reico_frames) - n_rejected} frames "
+                  f"({n_rejected} rejected by physicality screen) "
+                  f"(total selected so far: {len(selected)})")
+    
     print(f"\n[✓] Total frames queued for CP2K: {len(selected)}")
+    
     for atoms in selected:
         atoms.calc = None
 
-    e0_inputs = []  
+    if GEOOPT_TRIGGER == True:
+        print(f"\n[→] Pre-CP2K triage: checking for pathological initial forces "
+            f"(trigger > {GEOOPT_TRIGGER_FORCE} eV/Å)...")
+        selected = relax_pathological_frames(selected, calc)
+
+    e0_inputs = []  # ← fix for the UnboundLocalError
     if not os.path.exists(E0_JSON):
         elements_needed = set()
         for atoms in selected:
@@ -1391,9 +1664,10 @@ def run_round():
                 
     print(f"\nNext steps:")
     print(f"  1. Run CP2K:  bash {CP2K_DIR}/submit_all.sh")
-    print(f"  2. Parse:     python active_pipeline.py --parse-all or just --parse")
+    print(f"  2. Parse:     python active_pipeline.py --parse")
     print(f"  3. Re-try failed jobs, then:  python active_pipeline.py --reparse")
-    print(f"  4. Retrain:   update ROUND scripts")
+    print(f"  4. Retrain:   update ROUND to {ROUND+1} in both scripts, "
+          f"then run train_multiple.sh")
  
  
 def parse_and_update():
@@ -1421,7 +1695,6 @@ def parse_and_update():
  
     _write_outputs(new_frames, failed)
     return new_frames
-
 
 def reparse_failed():
     """
