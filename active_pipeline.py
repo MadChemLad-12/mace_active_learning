@@ -1586,7 +1586,7 @@ def run_round():
         unique_elements = sorted(set(
             sym for atoms in selected for sym in atoms.get_chemical_symbols()
         ))
-
+        print(f"Creating REICO samples with {unique_elements}")
         if not unique_elements:
             print("  [!] REICO: no elements found in selected pool yet, skipping.")
         else:

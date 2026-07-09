@@ -190,7 +190,7 @@ def make_output_dir():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(os.path.join(OUTPUT_DIR, AL_EXPORT_DIR), exist_ok=True)
     print(f"[✓] Output directory: {OUTPUT_DIR}/")
-    print(f"[✓] AL export directory: {OUTPUT_DIR}/{AL_EXPORT_DIR}/\n")
+    print(f"[✓] AL export directory: {AL_EXPORT_DIR}/\n")
 
 def load_persistent_cache():
     """Loads calculation cache data from disk if it exists."""
@@ -203,6 +203,31 @@ def load_persistent_cache():
         except Exception as e:
             print(f"[!] Warning: Failed to load cache file ({e}). Starting fresh.")
     return {}
+
+def estimate_default_cell(atoms, padding=10.0):
+    """Estimate a default cell by fitting a square around the atoms."""
+    positions = atoms.get_positions()
+    
+    min_pos = np.min(positions, axis=0)
+    max_pos = np.max(positions, axis=0)
+    cell_lengths = max_pos - min_pos + 2 * padding
+    calculated_cell = np.diag(cell_lengths)
+    
+    atoms.set_cell(calculated_cell)
+    atoms.set_pbc([True, True, True])
+    atoms.center(vacuum=None) 
+
+    print(f"  [✓] Cell replaced: {atoms.get_cell()}")
+    return atoms
+
+def read_structure(path):
+    """Read a structure and estimate a default cell if none is provided."""
+    atoms = read(path)
+    if not np.any(atoms.get_cell()):
+        print(f"  [!] WARNING: {path} structure has incomplete cell. "
+        f"Replacing with default cell from config.")
+        atoms = estimate_default_cell(atoms)
+    return atoms
 
 def save_persistent_cache(cache_data):
     """Saves calculation cache data to disk."""
@@ -954,7 +979,7 @@ def aimd_sampling(atoms, calc, name, n_steps=None, timestep=None):
     traj_out = os.path.join(OUTPUT_DIR, f"{name}_aimd.extxyz")
     write(traj_out, sampled_frames, format="extxyz")
 
-    al_path = os.path.join(OUTPUT_DIR, AL_EXPORT_DIR, f"mace_aimd_{name}.extxyz")
+    al_path = os.path.join(AL_EXPORT_DIR, f"mace_aimd_{name}.extxyz")
     write(al_path, sampled_frames, format="extxyz")
     print(f"  [✓] AIMD frames exported for AL: {al_path}")
 
@@ -986,7 +1011,7 @@ def main():
                         help="Enable unbiased MACE NVT AIMD sampling (default OFF until round 3)")
     parser.add_argument("--skip-aimd",   action="store_true",
                         help="Force-disable AIMD even if round >= 3")
-    parser.add_argument("--aimd-target", type=str, default=None,
+    parser.add_argument("--aimd-target", type=str, default="initial",
                         choices=["initial", "final", "both"],
                         help="Which endpoint(s) to run AIMD on (default: initial)")
     args = parser.parse_args()
@@ -1089,6 +1114,13 @@ def main():
 
             # Run calculations normally if cache misses
             atoms = read(path)
+            # Check cell size and if nothing replace
+            if not np.any(atoms.get_cell()):
+                print(f"  [!] WARNING: {label} structure has incomplete cell. "
+                      f"Replacing with default cell from config.")
+                atoms = estimate_default_cell(atoms)
+            print(f"  [→] Loaded {label} structure: {len(atoms)} atoms, "
+                  f"cell = {atoms.get_cell().lengths()} Å")
             atoms.calc = calc
 
             if SKIP_OPTIMISATION:
@@ -1272,7 +1304,7 @@ def main():
     with open(report_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\n[✓] Full report saved to: {report_path}")
-    print(f"[✓] AL candidate files in: {OUTPUT_DIR}/{AL_EXPORT_DIR}/")
+    print(f"[✓] AL candidate files in: {AL_EXPORT_DIR}/")
     print(f"    → Run: python active_pipeline.py  to start the selection + CP2K step")
     print("\n" + "="*70 + "\n")
 

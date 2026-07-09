@@ -480,7 +480,6 @@ def print_and_save_summary(all_metrics, labels, outdir):
 # ==============================================================================
 # Held-out set helper
 # ==============================================================================
-
 def create_held_out_set(
     pool_file="master_train_pool.xyz",
     held_out_file="held_out.xyz",
@@ -518,6 +517,8 @@ def create_held_out_set(
         print(f"[X] Pool file not found: {pool_file}")
         return
 
+    from collections import defaultdict
+    import random
     random.seed(seed)
 
     # ----------------------------------------------------------------
