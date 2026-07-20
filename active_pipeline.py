@@ -128,7 +128,7 @@ E0_JSON = "E0s.json"
 E0_DIR  = f"cp2k_e0_round{ROUND}"
 E0_CELL_SIZE = 20.0  # 20x20x20 Angstrom box
 # Mapping for atomic numbers
-Z_MAP = {"H": 1, "C": 6, "O": 8, "F": 9, "S": 16, "Pt": 78}
+Z_MAP = {"H": 1, "Li": 3, "C": 6, "O": 8, "F": 9, "P": 15, "S": 16, "": 78}
 
 # ============================================================
 # MACE re-scoring helper
