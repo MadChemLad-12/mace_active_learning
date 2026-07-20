@@ -1,3 +1,4 @@
 Name,initial,final
-Pt_atom,structures/Pt_atom.cif,structures/Pt_atom.cif
+Pt_atom,structures/Pt_atom.cif,
 SO3Pt111,structures/SO3Pt111.cif,structures/SO3Pt111.cif
+BF3,structures/BF3.cif
