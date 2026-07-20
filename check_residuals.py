@@ -11,7 +11,7 @@ import json
 #E0s = {1: -12.6294, 6: -146.3745, 8: -431.6014, 
 #       9: -656.5253, 16: -274.7039, 78: -3264.7049}
 
-MAX_FORCE_REF = 12.0   # eV/Å
+MAX_FORCE_REF = 15.0   # eV/Å
 MAX_RMSE      = 1000    # meV/Å
 NON_PT_THRESH = 5.3
 EXTERNAL_SYSTEM_TYPES = ("mptrj", "oc25", "reico")
@@ -137,12 +137,14 @@ for index, atoms in enumerate(unique_frames):
         coh_lo, coh_hi = -7.0, 0.5
     elif "Pt" in symbols_set and pt_count <= 3:          # dissolved Pt
         coh_lo, coh_hi = -7.0, 0.5
+    elif "P" in symbols_set or "N" in symbols_set:
+        res_lo, res_hi = -10.0, 5.0
     elif any(s in symbols_set for s in ("F", "S", "C")): # Nafion-containing
         coh_lo, coh_hi = -7.0, 0.5
     elif symbols_set <= {"H", "O"}:                      # bulk water
         coh_lo, coh_hi = -6.0, 0.5
     else:                                                 # fallback
-        coh_lo, coh_hi = -7.0, 0.5
+        coh_lo, coh_hi = -7.0, 5.0
 
     if not (coh_lo < coh < coh_hi):
         bad.append(atoms)
@@ -172,6 +174,8 @@ for index, atoms in enumerate(unique_frames):
     max_mace = np.max(np.linalg.norm(mace_f, axis=1))
 
     if   "Pt" in symbols_set and pt_count > 3:           # Pt slab
+        rmse_thresh = 1000
+    elif "P" in symbols_set or "N" in symbols_set:
         rmse_thresh = 1000
     elif symbols_set <= {"H", "O"}:                      # bulk water
         rmse_thresh = 600

@@ -413,6 +413,7 @@ KIND_PARAMS = {
     "F":  ("DZVP-MOLOPT-SR-GTH-q7",  "GTH-PBE-q7"),
     "S":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
     "Pt": ("DZVP-MOLOPT-SR-GTH-q18", "GTH-PBE-q18"),
+    # Add elements P, Li, B, N, 
 }
 
 if KIND_PARAMS == {    "Element":  ("DZVP-MOLOPT-SR-GTH",  "GTH-PBE")}:
@@ -2112,12 +2113,14 @@ def parse_all_cp2k_outputs(target_round=None):
                 res_lo, res_hi = -20.0, 10.0
             elif pt_count > 0:                                       # dissolved Pt
                 res_lo, res_hi = -20.0, 10.0
+            elif "P" in symbols_set or "N" in symbols_set:
+                res_lo, res_hi = -15.0, 7.0
             elif any(s in symbols_set for s in ("F", "S", "C")):    # Nafion
-                res_lo, res_hi = -20.0, 10.0
+                res_lo, res_hi = -10.0, 10.0
             elif symbols_set <= {"H", "O"}:                         # bulk water
                 res_lo, res_hi = -20.0, 10.0
             else:                                                    # fallback
-                res_lo, res_hi = -20.0, 10.0
+                res_lo, res_hi = -10.0, 5.0               
 
             if not (res_lo < residual < res_hi):
                 print(f"  [!] {out_path.name}: residual={residual:.2f} eV/atom "
