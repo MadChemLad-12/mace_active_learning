@@ -6,7 +6,7 @@ import hashlib
 from sklearn.linear_model import LinearRegression
 import numpy as np
 from ase.config import cfg
-
+import os
 from pathlib import Path
 from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
@@ -102,7 +102,7 @@ if found_models and len(found_models)>3:
     mace_path= found_models[-1]
 else:
     print(f"No new model found using foundational")
-    mace_path="mace-mp-0b3-medium-float32.model"
+    mace_path=os.environ.get("MACE_FOUNDATION_MODEL")
 
 from mace.calculators import MACECalculator
 calc_mace = MACECalculator(
