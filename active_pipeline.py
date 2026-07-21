@@ -344,7 +344,9 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
 # ============================================================
 # Step 3 — CP2K single-point input generation
 # ============================================================
-LIBDIR = os.environ.get("CP2K_LIBDIR", "path/to/cp2klib")
+LIBDIR = os.environ.get("CP2K_LIBDIR")
+if not LIBDIR:
+    raise ValueError("CP2K_LIBDIR environment variable is not set! Did you source config.local.sh?")
 
 CP2K_TEMPLATE = """\
 &GLOBAL
@@ -704,7 +706,7 @@ trap cleanup INT TERM
         fi
         """
         job_blocks.append(block)
-    with open(path, mode) as f:
+    with open(path, mode, encoding="utf-8") as f:
         if mode == "w":
             f.write(header)
         f.write("\n".join(job_blocks))
@@ -1356,7 +1358,7 @@ def is_physically_reasonable(atoms, calc, round_num=1, check_slab_z=False, force
 
     # --- Check 3: MACE per-atom force outlier ---
     # Scale the ceiling with round number — be stricter early on
-    force_ceilings = {1: 5.0, 2: 8.0, 3: 12.0, 4: 20.0}
+    force_ceilings = {1: 8.0, 2: 10.0, 3: 12.0, 4: 20.0}
     ceiling = force_ceilings.get(round_num, 15.0)
 
     # Use a copy to avoid attaching the calc to the original object permanently
@@ -2041,6 +2043,14 @@ def parse_all_cp2k_outputs(target_round=None):
     print(f"  CP2K Output Scan {'(Round ' + str(target_round) + ' Only)' if target_round else 'All Rounds'}")
     print("="*60)
 
+    try: 
+        with open(E0_JSON, "r") as file:
+            E0s_ref = {int(k): v for k, v in json.load(file).items()}
+            print(f"Your E0s are {E0s_ref}")
+    except FileNotFoundError:
+        print(f"Error: The file '{E0_JSON}' could not be found.")
+        E0s_ref = {}  # Provide a fallback empty dictionary so the rest of the script doesn't break
+    
     # ----------------------------------------------------------------
     # Step 1 — Load existing master pool and build hash index
     # ----------------------------------------------------------------
@@ -2079,14 +2089,6 @@ def parse_all_cp2k_outputs(target_round=None):
     new_frames   = []
     already_have = 0
     parse_failed = 0
-
-    try: 
-        with open(E0_JSON, "r") as file:
-            E0s_ref = {int(k): v for k, v in json.load(file).items()}
-            print(f"Your E0s are {E0s_ref}")
-    except FileNotFoundError:
-        print(f"Error: The file '{E0_JSON}' could not be found.")
-        E0s_ref = {}  # Provide a fallback empty dictionary so the rest of the script doesn't break
 
     for cp2k_dir in round_dirs:
         m = re.search(r"cp2k_sp_round(\d+)", cp2k_dir)
