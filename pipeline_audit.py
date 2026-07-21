@@ -33,14 +33,19 @@ import ase.io
 from ase.io import read, write
 from ase.units import Hartree, Bohr, eV, Angstrom
 from sklearn.preprocessing import normalize
+from ase.config import cfg
+from ase.calculators.mixing import SumCalculator
+from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
+from patches import apply_dftd3_cell_patch
+apply_dftd3_cell_patch()
 
 # Import functions and configurations from your active learning pipeline ecosystem
 from active_pipeline  import (
-    write_cp2k_sp, ROUND, POOL_FILE, CP2K_TIMEOUT,
+    APPLY_D3, write_cp2k_sp, POOL_FILE, CP2K_TIMEOUT,
     parse_cell_from_out, parse_positions_from_out, 
     _write_submission_script, parse_stress_from_out
 )
-
+ROUND = 1
 HASH_PRECISION = 4
 def get_atoms_hash(atoms):
     """Generates a stable geometric MD5 hash matching your pipeline profile."""
@@ -180,7 +185,19 @@ def force_insert_cp2k_output(out_file_path, destination="master"):
         print("  [→] Aligning MACE baseline residuals for training compatibility...")
         from active_pipeline import MODEL_PATH
         try:
-            calc = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
+            calc_mace = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
+            if APPLY_D3:
+                print(f"[→] Including D3 in calculations (MACE + D3)")
+                calc_DFT = TorchDFTD3Calculator(
+                    device="cuda",
+                    damping="bj",
+                    xc=cfg.get("dispersion_xc", "pbe"),
+                    cutoff=cfg.get("dispersion_cutoff", 40.0),
+                )
+                calc = SumCalculator([calc_mace, calc_DFT])  
+            else:
+                print(f"[→] Using MACE only (no D3)")
+                calc = calc_mace  
             atoms_copy = atoms.copy()
             atoms_copy.calc = calc
             atoms.info["MACE_energy"] = atoms_copy.get_potential_energy()
@@ -298,17 +315,23 @@ def track_and_recover_structures(file_path, force_cp2k=False, n_fps_frames=3):
             inp_path = write_cp2k_sp(atoms_target, job_name, cp2k_dir)
             forced_jobs = [(job_name, inp_path)]
             script_path = Path(cp2k_dir) / "submit_all.sh"
+            missing_path = Path(cp2k_dir) / "submit_missing.sh"
+
+            num_jobs = len(forced_jobs)*n_fps_frames
             
-            _write_submission_script(
-                path=script_path, 
-                jobs=forced_jobs, 
-                cp2k_dir=cp2k_dir, 
-                label="Forced Execution", 
-                n_total=1, 
-                n_skipped=0
-            )
-                            
-            print(f"    [+✓] Forced CP2K input written: {inp_path}")
+            for script_file in [script_path, missing_path]:
+                _write_submission_script(
+                    path=script_file, 
+                    jobs=forced_jobs, 
+                    cp2k_dir=cp2k_dir, 
+                    label="Forced Execution", 
+                    n_total=num_jobs, 
+                    n_skipped=0,
+                    append=True
+                )
+            
+            print(f"    [+✓] Forced CP2K input written: {inp_path} for both missing and full submission scripts.")
+            print(f"    [+✓] Submission scripts: {script_path} and {missing_path} created for forced execution.")
 
 def resolve_out_files(path_list):
         expanded = []
@@ -334,6 +357,7 @@ if __name__ == "__main__":
     parser.add_argument("--add-clean", nargs="+", default=[], help="List of completed CP2K .out paths to parse directly into training_clean.xyz")
     
     args = parser.parse_args()
+    print(f"\n[→] Active Learning Pipeline Audit v1.0 | Round {ROUND}\n{'='*75}")
 
     # Execute Manual Forcing Blocks
     if args.add_master:
@@ -346,5 +370,9 @@ if __name__ == "__main__":
 
     # Execute Auditing Block
     if args.audit:
+        print(f"Writing audit report for {len(args.audit)} target file(s)...")
+        print(f"\n[→] Auditing with force_cp2k={args.force_cp2k}, n_fps_frames={args.n_fps}\n{'-'*75}")
+        print(f"OUTPUT: cp2k_sp_round{ROUND}/submit_all.sh will be generated for any forced CP2K runs.")
         for target_file in args.audit:
             track_and_recover_structures(target_file, force_cp2k=args.force_cp2k, n_fps_frames=args.n_fps)
+        
