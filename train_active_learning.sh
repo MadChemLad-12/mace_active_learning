@@ -149,25 +149,28 @@ FLOAT_TYPE="float32"
 # Elements present across ALL your systems (atomic numbers)
 # H=1, C=6, O=8, F=9, S=16, Pt=78
 # Change to your E0_Values
-ATOMIC_NUMBERS="[1, 6, 8, 9, 16, 78]"
-E0_VALUES="{
-1: -12.6294, 
-6: -146.3745, 
-8: -431.6014, 
-9: -656.5253, 
-16: -274.7039, 
-78: -3264.7049}"
+# Load JSON E0 values
 
-#E0_VALUES="{
-#1: -17.34251075889506, 
-#6: -288.66025387600985, 
-#8: -434.5100510204964, 
-#9: -609.3938692937941, 
-#16: -32.07336154177861, 
-#78: -3270.692240970651}"
+JSON_FILE="E0_values.json"
 
-# E0 Values from cp2k single atoms
-# E0_VALUES=$(python3 -c "import json; print(json.load(open('E0s.json')))" 2>/dev/null)
+# Extract ATOMIC_NUMBERS using inline Python
+ATOMIC_NUMBERS=$(python3 -c "
+import json
+data = json.load(open('$JSON_FILE'))
+keys = [int(k) for k in data.keys() if k != 'Atomic Number']
+print(keys)
+")
+
+# Extract E0_VALUES formatted as a dictionary string
+E0_VALUES=$(python3 -c "
+import json
+data = json.load(open('$JSON_FILE'))
+e0 = {int(k): v for k, v in data.items() if k != 'Atomic Number'}
+print(e0)
+")
+
+echo "ATOMIC_NUMBERS=$ATOMIC_NUMBERS"
+echo "E0_VALUES=$E0_VALUES"
 
 # Path to parity plot script
 PARITY_SCRIPT="plot_parity.py"
