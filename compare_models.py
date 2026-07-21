@@ -44,6 +44,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 from ase.io import read, write
+from ase.config import cfg
+from ase.calculators.mixing import SumCalculator
+from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
+from patches import apply_dftd3_cell_patch
+apply_dftd3_cell_patch()
 
 # ==============================================================================
 # Configuration
@@ -51,7 +56,7 @@ from ase.io import read, write
 
 DEFAULT_TEST_SET = "held_out.xyz"
 DEFAULT_OUTPUT   = "comparison_results"
-
+APPLY_D3 = True  # Whether to include D3 in all calculations (MACE + D3) for this round. If False, only MACE is used.
 COLORS = ["#6c757d", "#2196F3", "#4CAF50", "#FF9800",
           "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
 
@@ -169,12 +174,23 @@ def evaluate_model(model_path, test_frames, device="cuda", dtype="float32",
     pred_e0s = pred_e0s or {}
 
     print(f"  [->] Loading: {Path(model_path).name}")
-    calc = MACECalculator(
+    calc_mace = MACECalculator(
         model_paths=model_path,
         device=device,
         default_dtype=dtype
     )
-
+    if APPLY_D3:
+        print(f"[→] Including D3 in calculations (MACE + D3)")
+        calc_DFT = TorchDFTD3Calculator(
+                    device="cuda",
+                    damping="bj",
+                    xc=cfg.get("dispersion_xc", "pbe"),
+                    cutoff=cfg.get("dispersion_cutoff", 40.0),
+                )
+        calc = SumCalculator([calc_mace, calc_DFT])    
+    else:
+        print(f"[→] Using MACE only (no D3)")
+        calc = calc_mace
     pred_e, ref_e = [], []
     pred_f, ref_f = [], []
     system_types  = []
@@ -229,8 +245,15 @@ def evaluate_per_system(model_path, test_frames, device="cuda", dtype="float32",
     ref_e0s  = ref_e0s  or {}
     pred_e0s = pred_e0s or {}
 
-    calc = MACECalculator(
+    calc_mace = MACECalculator(
         model_paths=model_path, device=device, default_dtype=dtype)
+    calc_DFT = TorchDFTD3Calculator(
+                device="cuda",
+                damping="bj",
+                xc=cfg.get("dispersion_xc", "pbe"),
+                cutoff=cfg.get("dispersion_cutoff", 40.0),
+            )
+    calc = SumCalculator([calc_mace, calc_DFT])
 
     by_system = {}
     for atoms in test_frames:
@@ -589,18 +612,21 @@ def main():
     # Keyed by atomic number for easy cross-checking with CP2K output.
     # ------------------------------------------------------------------
     from ase.data import chemical_symbols as _cs
+    import json
+
     # You can add your own below if you like I 
-    CP2K_E0S_BY_Z = {
-        1:  -12.6294,    # H
-        6:  -146.3745,   # C
-        8:  -431.6014,   # O
-        9:  -656.5253,   # F
-        16: -274.7039,   # S
-        78: -3264.7049,  # Pt
-    }
-    if CP2K_E0S_BY_Z is None:
-        print(f" Using predefined E0s which can be found in main")
-    CP2K_E0S = {_cs[z]: e for z, e in CP2K_E0S_BY_Z.items()}
+    E0_JSON = "E0s.json"
+    try: 
+        with open(E0_JSON, "r") as file:
+            E0s_ref = {int(k): v for k, v in json.load(file).items()}
+            print(f"Your E0s are {E0s_ref}")
+    except FileNotFoundError:
+        print(f"Error: The file '{E0_JSON}' could not be found.")
+        E0s_ref = {}
+        print(f"The energy will not be reliable so only read forces")
+
+        
+    CP2K_E0S = E0s_ref
  
     parser = argparse.ArgumentParser(
         description="Compare MACE model versions on a fixed test set"

@@ -55,6 +55,11 @@ from scipy.spatial import cKDTree
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import ThreadPoolExecutor
 import os
+from ase.config import cfg
+from ase.calculators.mixing import SumCalculator
+from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
+from patches import apply_dftd3_cell_patch
+apply_dftd3_cell_patch()
 
 # ==============================================================================
 # SETTINGS — CHANGE THESE
@@ -71,6 +76,7 @@ FMAX            = 0.05     # Force convergence threshold (eV/Å)
 MAX_STEPS       = 800      # Max optimisation steps per structure
 OPTIMIZER       = "FIRE"   # "BFGS" (smooth surfaces) or "FIRE" (robust, any surface)
 SKIP_OPTIMISATION = False   # Set to True to skip geometry optimisation
+APPLY_D3        = True     # Set to apply D3 correctional
 
 # Atom fixing
 FIX_BY_HEIGHT         = False
@@ -188,7 +194,7 @@ with open(PATH_CSV, newline='') as csvfile:
 
 def make_output_dir():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(os.path.join(OUTPUT_DIR, AL_EXPORT_DIR), exist_ok=True)
+    os.makedirs(os.path.join(AL_EXPORT_DIR), exist_ok=True)
     print(f"[✓] Output directory: {OUTPUT_DIR}/")
     print(f"[✓] AL export directory: {AL_EXPORT_DIR}/\n")
 
@@ -341,12 +347,23 @@ def map_atoms_by_proximity(atoms_ref, atoms_to_map, cutoff=8.0):
 def load_mace():
     """Load MACE model once — reused for all structures."""
     print(f"[→] Loading MACE model from: {MACE_MODEL_PATH}")
-    calc = MACECalculator(
+    calc_mace = MACECalculator(
         model_paths=MACE_MODEL_PATH,
         device=DEVICE,
         default_dtype=DTYPE
     )
-    print(f"[✓] MACE model loaded\n")
+    if APPLY_D3:
+        print(f"[→] Including D3 in calculations (MACE + D3)")
+        calc_DFT = TorchDFTD3Calculator(
+                    device="cuda",
+                    damping="bj",
+                    xc=cfg.get("dispersion_xc", "pbe"),
+                    cutoff=cfg.get("dispersion_cutoff", 40.0),
+                )
+        calc = SumCalculator([calc_mace, calc_DFT])
+    else:
+        print(f"[→] Using MACE only (no D3)")
+        calc = calc_mace
     return calc
 
 
@@ -639,7 +656,7 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
     print(f"[✓] NEB visualisation plots saved for {name}")
     
     # Active-learning candidate export (one file per system)
-    al_path = os.path.join(OUTPUT_DIR, AL_EXPORT_DIR, f"mace_neb_{name}.extxyz")
+    al_path = os.path.join(AL_EXPORT_DIR, f"mace_neb_{name}.extxyz")
     write(al_path, images, format="extxyz")
     print(f"[✓] NEB frames exported for AL: {al_path}")
 
@@ -663,7 +680,7 @@ def export_geoopt_for_al(name, init_atoms, final_atoms):
         at.info["source"]       = "mace_geoopt"
         frames.append(at)
 
-    al_path = os.path.join(OUTPUT_DIR, AL_EXPORT_DIR, f"mace_geoopt_{name}.extxyz")
+    al_path = os.path.join(AL_EXPORT_DIR, f"mace_geoopt_{name}.extxyz")
     write(al_path, frames, format="extxyz")
     print(f"[✓] GeoOpt frames exported for AL: {al_path}")
 
@@ -1084,6 +1101,11 @@ def main():
 
         # --- Optimise both endpoints ---
         for label, path in [("initial", init_path), ("final", final_path)]:
+            if not path: 
+                print(f"  [!] No file provided for {label} structure. Skipping.")
+                config_result[f"{label}_status"] = "MISSING"
+                continue
+
             if not os.path.exists(path):
                 print(f"  [✗] File not found: {path}")
                 config_result[f"{label}_status"] = "FILE NOT FOUND"

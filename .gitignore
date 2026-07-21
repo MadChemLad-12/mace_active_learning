@@ -45,6 +45,7 @@ geo_opt_results/
 # ─── CP2K job directories ──────────────────────────────────
 cp2k_sp_round*/
 cp2k_e0_round*/
+comparison_results_val/
 geometry_index_global.json
 test_round1.csv
 

@@ -5,13 +5,22 @@ import hashlib
 # Build composition matrix and solve for best-fit E0s
 from sklearn.linear_model import LinearRegression
 import numpy as np
+from ase.config import cfg
+import os
 from pathlib import Path
+from ase.calculators.mixing import SumCalculator
+from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
+from patches import apply_dftd3_cell_patch
+apply_dftd3_cell_patch()
+APPLY_D3 = True
 import json
 #Example Json {Atomic number: energy eV}
 #E0s = {1: -12.6294, 6: -146.3745, 8: -431.6014, 
 #       9: -656.5253, 16: -274.7039, 78: -3264.7049}
 
-MAX_FORCE_REF = 12.0   # eV/Å
+# Git one
+
+MAX_FORCE_REF = 15.0   # eV/Å
 MAX_RMSE      = 1000    # meV/Å
 NON_PT_THRESH = 5.3
 EXTERNAL_SYSTEM_TYPES = ("mptrj", "oc25", "reico")
@@ -93,14 +102,26 @@ if found_models and len(found_models)>3:
     mace_path= found_models[-1]
 else:
     print(f"No new model found using foundational")
-    mace_path="mace-mp-0b3-medium-float32.model"
+    mace_path=os.environ.get("MACE_FOUNDATION_MODEL")
 
 from mace.calculators import MACECalculator
-calc = MACECalculator(
+calc_mace = MACECalculator(
     model_paths=mace_path,
     device="cuda",
     default_dtype="float32"
 )
+if APPLY_D3:
+    print(f"[→] Including D3 in calculations (MACE + D3)")
+    calc_DFT = TorchDFTD3Calculator(
+                    device="cuda",
+                    damping="bj",
+                    xc=cfg.get("dispersion_xc", "pbe"),
+                    cutoff=cfg.get("dispersion_cutoff", 40.0),
+                )
+    calc = SumCalculator([calc_mace, calc_DFT])    
+else:
+    print(f"[→] Using MACE only (no D3)")
+    calc = calc_mace
 
 for index, atoms in enumerate(unique_frames):
     symbols_list = atoms.get_chemical_symbols()
@@ -137,12 +158,14 @@ for index, atoms in enumerate(unique_frames):
         coh_lo, coh_hi = -7.0, 0.5
     elif "Pt" in symbols_set and pt_count <= 3:          # dissolved Pt
         coh_lo, coh_hi = -7.0, 0.5
+    elif "P" in symbols_set or "N" in symbols_set:
+        res_lo, res_hi = -10.0, 5.0
     elif any(s in symbols_set for s in ("F", "S", "C")): # Nafion-containing
         coh_lo, coh_hi = -7.0, 0.5
     elif symbols_set <= {"H", "O"}:                      # bulk water
         coh_lo, coh_hi = -6.0, 0.5
     else:                                                 # fallback
-        coh_lo, coh_hi = -7.0, 0.5
+        coh_lo, coh_hi = -7.0, 5.0
 
     if not (coh_lo < coh < coh_hi):
         bad.append(atoms)
@@ -172,6 +195,8 @@ for index, atoms in enumerate(unique_frames):
     max_mace = np.max(np.linalg.norm(mace_f, axis=1))
 
     if   "Pt" in symbols_set and pt_count > 3:           # Pt slab
+        rmse_thresh = 1000
+    elif "P" in symbols_set or "N" in symbols_set:
         rmse_thresh = 1000
     elif symbols_set <= {"H", "O"}:                      # bulk water
         rmse_thresh = 600

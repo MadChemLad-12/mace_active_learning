@@ -1,0 +1,12 @@
+name: mace_test
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - openblas
+  - packmol
+  - spglib
+  - python=3.11
+  - cp2k=2024.2
+  - pip
+prefix: /home/user/miniconda3/envs/mace_test
