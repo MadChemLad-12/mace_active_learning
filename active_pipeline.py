@@ -94,15 +94,16 @@ GEOOPT_FMAX_TARGET   = 2.0    # eV/Å -- loose target: "no longer exploding", no
 
 EXTERNAL_DATASETS = False  # add this to your config flags at the top
 
+# Additional data sets to parse for training
 EXTERNAL_SOURCES = {
-    "mptrj_pt": {
-        "path": "training_data/mptrj-gga-ggapu/master_ranked_MPtrj_structures.extxyz",
-        "n_samples": 30,   # only 35 frames total — take most of them
-    },
-    "oc25_pt": {
-        "path": "hugface_data/train/master_ranked_OC25_structures.extxyz",
-        "n_samples": 90,   # 93 frames total — sample ~30
-    },
+    #"mptrj_pt": {
+    #    "path": "training_data/mptrj-gga-ggapu/master_ranked_MPtrj_structures.extxyz",
+    #    "n_samples": 30,   # only 35 frames total — take most of them
+    #},
+    #"oc25_pt": {
+    #    "path": "hugface_data/train/master_ranked_OC25_structures.extxyz",
+    #    "n_samples": 90,   # 93 frames total — sample ~30
+    #},
 }
 
 REICO_SAMPLEING = True
