@@ -66,3 +66,4 @@ train_V*_*.log
 *.swp
 config.local.sh
 *.sif
+settings.json
