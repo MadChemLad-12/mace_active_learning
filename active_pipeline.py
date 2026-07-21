@@ -42,10 +42,15 @@ import os
 import re
 import sys
 import json
+from ase.config import cfg
 import numpy as np
 from pathlib import Path
 from ase.io import read, write
 from ase.units import Hartree, Bohr
+from ase.calculators.mixing import SumCalculator
+from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
+from patches import apply_dftd3_cell_patch
+apply_dftd3_cell_patch()
 
 # ============================================================
 # Configuration
@@ -91,6 +96,8 @@ GEOOPT_TRIGGER       = True   # Turns this feature on or off
 GEOOPT_TRIGGER_FORCE = 20.0   # eV/Å -- well above FORCE_THRESHOLD; this flags "broken", not "uncertain"
 GEOOPT_MAX_STEPS     = 30     # hard cap -- keep this cheap and avoid fully annealing the frame
 GEOOPT_FMAX_TARGET   = 2.0    # eV/Å -- loose target: "no longer exploding", not "converged minimum"
+APPLY_D3             = True   # Whether to include D3 in all calculations (MACE + D3) for this round. If False, only MACE is used.
+
 
 EXTERNAL_DATASETS = False  # add this to your config flags at the top
 
@@ -144,7 +151,19 @@ def rescore_with_mace(frames, model_path, device="cuda", dtype="float32"):
         print("[!] mace not importable — skipping re-score, using stored forces.")
         return frames
 
-    calc = MACECalculator(model_paths=model_path, device=device, default_dtype=dtype)
+    calc_mace = MACECalculator(model_paths=model_path, device=device, default_dtype=dtype)
+    if APPLY_D3:
+        print(f"[→] Re-scoring with MACE + D3 (device={device}, dtype={dtype})...")
+        calc_DFT = TorchDFTD3Calculator(
+            device=device,
+            damping="bj",
+            xc=cfg.get("dispersion_xc", "pbe"),
+            cutoff=cfg.get("dispersion_cutoff", 40.0),
+        )
+        calc = SumCalculator([calc_mace, calc_DFT])
+    else:
+        print(f"[→] Re-scoring with MACE only (device={device}, dtype={dtype})...")
+        calc = calc_mace
     for atoms in frames:
         atoms.calc = calc
         try:
@@ -256,8 +275,8 @@ def load_candidates(al_input_dir):
         skipped = len(frames) - len(filtered)
         if skipped:
             print(f"  Excluded {skipped:3d} frames   ←  {xyz_path.name} (keyword match)")
-        all_frames.extend(frames)
-        print(f"  Loaded {len(frames):4d} frames  ←  {xyz_path.name}")
+        all_frames.extend(filtered)
+        print(f"  Loaded {len(filtered):4d} frames  ←  {xyz_path.name}")
 
     print(f"\nTotal candidate frames: {len(all_frames)}")
     return all_frames
@@ -580,32 +599,65 @@ def _cp2k_output_is_complete(outfile):
         return False
     return True
 
-def _write_submission_script(path, jobs, cp2k_dir, label, n_total, n_skipped):
+def _write_submission_script(path, jobs, cp2k_dir, label, n_total, n_skipped, append=False):
     """Write a bash submission script for the given list of (name, inp) jobs."""
+    mode = "a" if append and path.exists() else "w"
     skip_comment = (
         f"# {n_skipped} of {n_total} frames skipped (completed .out already present)\n"
         if n_skipped else ""
     )
     header = f"""\
 #!/bin/bash
+set -uo pipefail
 # CP2K single-point calculations - Round {ROUND} ({label})
 {skip_comment}
+
 timestamp=$(date +%Y%m%d_%H%M)
 start_time=$(date +%s)
 counter=0
+export OMP_NUM_THREADS=6
 total={len(jobs)}
+
+# --- memory guard settings ---
+MEM_LIMIT_KB=$(( 62 * 1024 * 1024 * 85 / 100 ))   # 85% of 62GB, in KB
+MEM_CHECK_INTERVAL=2                               # seconds between checks
+FAILED_LOG={cp2k_dir}/failed_jobs.txt
+TIMES_LOG={cp2k_dir}/job_times.log
+
+# Hard backstop in case the polling watchdog misses a fast spike.
+# Virtual memory ulimit in KB; set slightly above MEM_LIMIT_KB so the
+# watchdog (softer, faster to react) is normally the one that fires.
+ulimit -v $(( MEM_LIMIT_KB * 110 / 100 ))
+
 print_eta() {{
     if (( counter > 0 && elapsed > 0 )); then
         avg=$(( elapsed / counter ))
         eta=$(( avg * (total - counter) ))
-        echo "  ETA: ~$(( remaining / 60 ))m remaining"
+        echo "  ETA: ~$(( eta / 60 ))m remaining"
     fi
 }}
-
+mem_watchdog() {{
+    local target_pid=$1
+    local job_name=$2
+    while kill -0 "$target_pid" 2>/dev/null; do
+        pids="$target_pid $(pgrep -P "$target_pid" 2>/dev/null)"
+        rss=$(ps -o rss= -p $pids 2>/dev/null | awk '{{sum+=$1}} END {{print sum+0}}')
+        if (( rss > 0 && rss > MEM_LIMIT_KB )); then
+            echo "job killed because of memory: {{$job_name}} (RSS=${{rss}}KB > limit=${{MEM_LIMIT_KB}}KB)"
+            kill -TERM "$target_pid" 2>/dev/null
+            sleep 2
+            kill -KILL "$target_pid" 2>/dev/null
+            echo "MEMKILL: $job_name" >> "$FAILED_LOG"
+            break
+        fi
+        sleep "$MEM_CHECK_INTERVAL"
+    done
+}}
 
 cleanup() {{
     echo "Interrupted at job $counter/$total"
     rm -f *.wfn *.wfn.bak-1
+    rm -f {cp2k_dir}/*.wfn {cp2k_dir}/*.wfn.bak-1
     exit 1
 }}
 trap cleanup INT TERM
@@ -615,21 +667,46 @@ trap cleanup INT TERM
     for name, inp in jobs:
         block = f"""\
         counter=$((counter + 1))
+        job_start=$(date +%s)
         echo "[$counter/$total] {name} — started $(date +%H:%M)"
-        timeout {CP2K_TIMEOUT} cp2k.ssmp -i {inp} -o {cp2k_dir}/{name}.out \\
-            || echo "FAILED: {name}" >> {cp2k_dir}/failed_jobs.txt 
-        echo "  finished $(date +%H:%M)"
+
+        timeout {CP2K_TIMEOUT} cp2k.ssmp -i {inp} -o {cp2k_dir}/{name}.out &
+        cp2k_pid=$!
+        mem_watchdog "$cp2k_pid" "{name}" &
+        watchdog_pid=$!
+
+        wait "$cp2k_pid"
+        cp2k_status=$?
+        kill "$watchdog_pid" 2>/dev/null
+        wait "$watchdog_pid" 2>/dev/null
+
+        if grep -q "MEMKILL: {name}" "$FAILED_LOG" 2>/dev/null; then
+            fail_reason="oom"
+        elif (( cp2k_status == 124 )); then
+            fail_reason="timeout"
+            echo "FAILED (timeout): {name}" >> "$FAILED_LOG"
+        elif (( cp2k_status != 0 )); then
+            fail_reason="crash (exit $cp2k_status)"
+            echo "FAILED (crash exit=$cp2k_status): {name}" >> "$FAILED_LOG"
+        else
+            fail_reason="ok"
+        fi
+
+        job_elapsed=$(( $(date +%s) - job_start ))
+        echo "{name} ${{job_elapsed}}s status=${{fail_reason}}" >> "$TIMES_LOG"
+        echo "  finished $(date +%H:%M) (${{job_elapsed}}s, ${{fail_reason}})"
+
         elapsed=$(( $(date +%s) - start_time ))
         print_eta
         if (( counter % 10 == 0 )); then
             rm -f *.wfn *.wfn.bak-1
+            rm -f {cp2k_dir}/*.wfn {cp2k_dir}/*.wfn.bak-1
         fi
-        
         """
         job_blocks.append(block)
-        
-    with open(path, "w") as f:
-        f.write(header)
+    with open(path, mode) as f:
+        if mode == "w":
+            f.write(header)
         f.write("\n".join(job_blocks))
 
 def write_all_sp_inputs(selected_frames, cp2k_dir):
@@ -1241,8 +1318,7 @@ def build_per_system_training_files(new_frames, out_dir="training_data"):
     print(f"  [✓] Combined: {len(new_frames)} frames  →  {combined}")
     return by_system
 
-# I need ot amke this function as generric as possible and remove the Pt check
-def is_physically_reasonable(atoms, calc, round_num=1):
+def is_physically_reasonable(atoms, calc, round_num=1, check_slab_z=False, forces=None):
     """
     Screen a candidate frame for physical reasonableness before
     submitting to CP2K. Returns (is_ok, reason_if_rejected).
@@ -1262,7 +1338,7 @@ def is_physically_reasonable(atoms, calc, round_num=1):
         idx = np.argmin(d)
         return False, f"atoms too close: {atoms.symbols[i[idx]]}-{atoms.symbols[j[idx]]} = {d[idx]:.2f} Å"
 
-    # --- Check 1.5: Optional low-Z atom check (catches atoms embedded below slab) ---
+    # --- Check 2: Optional low-Z atom check (catches atoms embedded below slab) ---
     # If SLAB_ELEMENT is set in atoms.info, check non-slab atoms aren't buried.
     # This is a generalised version: set atoms.info["slab_element"] = "Pt" (or any element)
     # and atoms.info["slab_z_threshold"] = 5.0 to activate.
@@ -1284,9 +1360,11 @@ def is_physically_reasonable(atoms, calc, round_num=1):
     ceiling = force_ceilings.get(round_num, 15.0)
 
     # Use a copy to avoid attaching the calc to the original object permanently
-    atoms_copy = atoms.copy()
-    atoms_copy.calc = calc
-    forces = atoms_copy.get_forces()
+    if forces is None:
+        atoms_copy = atoms.copy()
+        atoms_copy.calc = calc
+        forces = atoms_copy.get_forces()
+
     force_mags = np.linalg.norm(forces, axis=1)
     
     max_f = np.max(force_mags)
@@ -1470,6 +1548,7 @@ def run_round():
     print("\nScoring all candidates by MACE max force...")
     scored = []
     for atoms in all_candidates:
+        f = None
         if atoms.calc is not None:
             try:
                 f = atoms.get_forces()
@@ -1478,7 +1557,7 @@ def run_round():
                 score = 0.0
         else:
             score = 0.0
-        scored.append((score, atoms))
+        scored.append((score, atoms, f))
 
     # Sort by descending force magnitude — most uncertain first
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -1490,9 +1569,21 @@ def run_round():
     skipped_seen = set()  # hashes already in selected (avoid duplicates within batch)
 
     print(f"\n[→] Selecting up to {N_SELECT_TOTAL} frames that need CP2K...")
-    calc = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
     
-    for score, atoms in scored:
+    calc_mace = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
+    if APPLY_D3:
+        print(f"  [→] D3 dispersion correction will be applied to MACE scores.")
+        calc_DFT = TorchDFTD3Calculator(
+                    device="cuda",
+                    damping="bj",
+                    xc=cfg.get("dispersion_xc", "pbe"),
+                    cutoff=cfg.get("dispersion_cutoff", 40.0),
+                )
+        calc = SumCalculator([calc_mace, calc_DFT])    
+    else:
+        print(f"  [→] No D3 dispersion correction applied to MACE scores.")
+        calc = calc_mace
+    for score, atoms, forces in scored:
         if len(selected) >= N_SELECT_TOTAL:
             break
 
@@ -1508,7 +1599,7 @@ def run_round():
             continue
 
         # Skip if below force threshold (only if we have enough candidates above it)
-        is_ok, reason = is_physically_reasonable(atoms, calc, round_num=ROUND)
+        is_ok, reason = is_physically_reasonable(atoms, calc, round_num=ROUND, forces=forces)
         if not is_ok:
             print(f"  [✗] Skipped (unphysical): "
                 f"{atoms.info.get('system_type','?')}  — {reason}")
@@ -2292,7 +2383,7 @@ if __name__ == "__main__":
     parser.add_argument("--audit-jobs", nargs="+", default=[], help="List of specific job names to audit")
     parser.add_argument("--requeue", action="store_true", help="Append the audited jobs to a submission script if they failed")
     parser.add_argument("--runs",      type=int, default=100, help="How many cp2k runs are required")
-    parser.add_argument("--model",     type=str, default="/home/user/Documents/Programs/Python/ASE/MACE/mace-mp-0b3-medium-float32.model", help="What model to validate with?")
+    parser.add_argument("--model",     type=str, default="mace-mp-0b3-medium-float32.model", help="What model to validate with?")
     parser.add_argument(
     "--exclude",
     nargs="*",
