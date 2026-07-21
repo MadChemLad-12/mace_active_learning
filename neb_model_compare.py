@@ -59,12 +59,12 @@ MODELS = {
         "color": "#2196F3",
     },
     "finetuned": {
-        "path":  os.environ.get("MACE_FINETUNED_MODEL", "mace_V4_active_learning_stagetwo.model"),
-        "label": "MACE-V4",
+        "path":  os.environ.get("MACE_FINETUNED_MODEL"),
+        "label": "Fine-tune",
         "color": "#F44336",
     },
 }
-PATH_CSV    = os.environ.get("MACE_NEB_CSV", "Pt_Diss_Neb_test.csv")
+PATH_CSV    = os.environ.get("MACE_NEB_CSV", "configs.csv")
 OUTPUT_ROOT = os.environ.get("MACE_NEB_OUTPUT", "neb_comparison")
 
 # ── Device ────────────────────────────────────────────────────────────────────
