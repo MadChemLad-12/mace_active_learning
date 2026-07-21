@@ -5,11 +5,20 @@ import hashlib
 # Build composition matrix and solve for best-fit E0s
 from sklearn.linear_model import LinearRegression
 import numpy as np
+from ase.config import cfg
+
 from pathlib import Path
+from ase.calculators.mixing import SumCalculator
+from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
+from patches import apply_dftd3_cell_patch
+apply_dftd3_cell_patch()
+APPLY_D3 = True
 import json
 #Example Json {Atomic number: energy eV}
 #E0s = {1: -12.6294, 6: -146.3745, 8: -431.6014, 
 #       9: -656.5253, 16: -274.7039, 78: -3264.7049}
+
+# Git one
 
 MAX_FORCE_REF = 15.0   # eV/Å
 MAX_RMSE      = 1000    # meV/Å
@@ -96,11 +105,23 @@ else:
     mace_path="mace-mp-0b3-medium-float32.model"
 
 from mace.calculators import MACECalculator
-calc = MACECalculator(
+calc_mace = MACECalculator(
     model_paths=mace_path,
     device="cuda",
     default_dtype="float32"
 )
+if APPLY_D3:
+    print(f"[→] Including D3 in calculations (MACE + D3)")
+    calc_DFT = TorchDFTD3Calculator(
+                    device="cuda",
+                    damping="bj",
+                    xc=cfg.get("dispersion_xc", "pbe"),
+                    cutoff=cfg.get("dispersion_cutoff", 40.0),
+                )
+    calc = SumCalculator([calc_mace, calc_DFT])    
+else:
+    print(f"[→] Using MACE only (no D3)")
+    calc = calc_mace
 
 for index, atoms in enumerate(unique_frames):
     symbols_list = atoms.get_chemical_symbols()
