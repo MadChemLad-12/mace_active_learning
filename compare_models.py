@@ -56,6 +56,7 @@ apply_dftd3_cell_patch()
 
 DEFAULT_TEST_SET = "held_out.xyz"
 DEFAULT_OUTPUT   = "comparison_results"
+MAX_FORCE_THRESHOLD = 50.0
 APPLY_D3 = True  # Whether to include D3 in all calculations (MACE + D3) for this round. If False, only MACE is used.
 COLORS = ["#6c757d", "#2196F3", "#4CAF50", "#FF9800",
           "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
@@ -200,7 +201,10 @@ def evaluate_model(model_path, test_frames, device="cuda", dtype="float32",
         if "REF_energy" not in atoms.info:
             failed += 1
             continue
-        if "REF_forces" not in atoms.arrays:
+
+        ref_forces = atoms.arrays["REF_forces"]
+        if np.max(np.abs(ref_forces)) > MAX_FORCE_THRESHOLD:
+            print(f"    [!] Frame {i} excluded (Max force > {MAX_FORCE_THRESHOLD} eV/A)")
             failed += 1
             continue
 
@@ -238,55 +242,34 @@ def evaluate_model(model_path, test_frames, device="cuda", dtype="float32",
         "n_failed":      failed,
     }
 
-def evaluate_per_system(model_path, test_frames, device="cuda", dtype="float32",
-                        ref_e0s=None, pred_e0s=None):
-    """Same as evaluate_model but grouped by system_type. Same dual-E0s logic."""
-    from mace.calculators import MACECalculator
-    ref_e0s  = ref_e0s  or {}
-    pred_e0s = pred_e0s or {}
-
-    calc_mace = MACECalculator(
-        model_paths=model_path, device=device, default_dtype=dtype)
-    calc_DFT = TorchDFTD3Calculator(
-                device="cuda",
-                damping="bj",
-                xc=cfg.get("dispersion_xc", "pbe"),
-                cutoff=cfg.get("dispersion_cutoff", 40.0),
-            )
-    calc = SumCalculator([calc_mace, calc_DFT])
-
+def evaluate_per_system(results):
+    """Group metrics by system_type using already evaluated model results."""
     by_system = {}
-    for atoms in test_frames:
-        if "REF_energy" not in atoms.info or "REF_forces" not in atoms.arrays:
-            continue
-        sys_name   = atoms.info.get("system_type", "unknown")
-        n          = len(atoms)
-        dft_shift  = frame_e0s_shift(atoms, ref_e0s)
-        pred_shift = frame_e0s_shift(atoms, pred_e0s)
-        try:
-            ac = atoms.copy()
-            ac.calc = calc
-            pe = (ac.get_potential_energy() - pred_shift) / n
-            pf = ac.get_forces().flatten()
-            re = (atoms.info["REF_energy"]  - dft_shift)  / n
-            rf = atoms.arrays["REF_forces"].flatten()
-
-            if sys_name not in by_system:
-                by_system[sys_name] = {"pe": [], "re": [], "pf": [], "rf": []}
-            by_system[sys_name]["pe"].append(pe)
-            by_system[sys_name]["re"].append(re)
-            by_system[sys_name]["pf"].extend(pf.tolist())
-            by_system[sys_name]["rf"].extend(rf.tolist())
-        except Exception:
-            pass
+    
+    # Unpack pre-calculated values
+    for pe, re, pf_chunk, rf_chunk, sys_name in zip(
+        results["pred_energies"], 
+        results["ref_energies"], 
+        # Chunk flattened forces back by atom count per frame
+        np.array_split(results["pred_forces"], len(results["pred_energies"])),
+        np.array_split(results["ref_forces"], len(results["ref_energies"])),
+        results["system_types"]
+    ):
+        if sys_name not in by_system:
+            by_system[sys_name] = {"pe": [], "re": [], "pf": [], "rf": []}
+            
+        by_system[sys_name]["pe"].append(pe)
+        by_system[sys_name]["re"].append(re)
+        by_system[sys_name]["pf"].extend(pf_chunk.tolist())
+        by_system[sys_name]["rf"].extend(rf_chunk.tolist())
 
     metrics = {}
     for sys_name, d in by_system.items():
-        pe = np.array(d["pe"]); re = np.array(d["re"])
-        pf = np.array(d["pf"]); rf = np.array(d["rf"])
+        pe, re = np.array(d["pe"]), np.array(d["re"])
+        pf, rf = np.array(d["pf"]), np.array(d["rf"])
         metrics[sys_name] = {
-            "energy_rmse_meV_atom": float(np.sqrt(np.mean((pe-re)**2))) * 1000,
-            "force_rmse_meV_A":     float(np.sqrt(np.mean((pf-rf)**2))) * 1000,
+            "energy_rmse_meV_atom": float(np.sqrt(np.mean((pe - re) ** 2))) * 1000,
+            "force_rmse_meV_A":     float(np.sqrt(np.mean((pf - rf) ** 2))) * 1000,
             "n_frames": len(pe),
         }
     return metrics
@@ -296,8 +279,9 @@ def compute_metrics(r):
     def rmse(a, b): return float(np.sqrt(np.mean((a - b)**2)))
     def mae(a, b):  return float(np.mean(np.abs(a - b)))
     def r2(a, b):
-        ss_res = np.sum((b - a)**2)
-        ss_tot = np.sum((b - np.mean(b))**2)
+        pred_shifted = a - (np.mean(a) - np.mean(b))
+        ss_res = np.sum((b - pred_shifted)**2)
+        ss_tot = np.sum((b - np.mean(pred_shifted))**2)
         return float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
 
     pe, re = r["pred_energies"], r["ref_energies"]
@@ -504,9 +488,9 @@ def print_and_save_summary(all_metrics, labels, outdir):
 # Held-out set helper
 # ==============================================================================
 def create_held_out_set(
-    pool_file="master_train_pool.xyz",
+    pool_file="training_clean.xyz",
     held_out_file="held_out.xyz",
-    cleaned_pool_file="training_clean.xyz",
+    cleaned_pool_file="train_compare.xyz",
     n=50,
     seed=42,
 ):
@@ -641,7 +625,9 @@ def main():
     parser.add_argument("--outdir", default=DEFAULT_OUTPUT)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--make-held-out", action="store_true",
-                        help="Create held_out.xyz from master_train_pool.xyz then exit")
+                        help="Create held_out.xyz from cleaned data then exit")
+    parser.add_argument("--cleaned-file", default="cleaned_pool.xyz",
+                        help="Cleaned XYZ file to split held-out data from")
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -727,10 +713,7 @@ def main():
             ref_e0s=CP2K_E0S, pred_e0s=pred_e0s,
         )
         metrics = compute_metrics(results)
-        per_system = evaluate_per_system(
-            model_path, test_frames, device=args.device,
-            ref_e0s=CP2K_E0S, pred_e0s=pred_e0s,
-        )
+        per_system = evaluate_per_system(results)
 
         all_metrics.append(metrics)
         all_per_system.append(per_system)
