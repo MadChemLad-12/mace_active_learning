@@ -36,7 +36,7 @@ from sklearn.preprocessing import normalize
 from ase.config import cfg
 from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
-from MACE_CP2K_pipeline.src.patches import apply_dftd3_cell_patch
+from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 
 # Import functions and configurations from your active learning pipeline ecosystem

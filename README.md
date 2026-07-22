@@ -152,7 +152,7 @@ pip install -r pip_requirements.txt
 ### 3. Set environment variables
 
 Add the following to your `~/.bashrc` (or equivalent):
-You can quickly do this using export config.local.sh
+You can quickly do this using source config.local.sh
 
 Or manually through below
 
