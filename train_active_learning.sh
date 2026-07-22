@@ -146,9 +146,16 @@ R_MAX=5.0
 NUM_SAMPLES_PT=1200   # Materials Project frames to mix in during multi-head training
 FLOAT_TYPE="float32"
 
+# Weights
+FORCES_WEIGHT=100
+ENERGY_WEIGHT=1
+STRESS_WEIGHT=0
+
+FORCES_SWA=100
+ENERGY_SWA=5
+STRESS_SWA=0
+
 # Elements present across ALL your systems (atomic numbers)
-# H=1, C=6, O=8, F=9, S=16, Pt=78
-# Change to your E0_Values
 # Load JSON E0 values
 
 JSON_FILE="E0_values.json"
@@ -246,12 +253,13 @@ mace_run_train \
     --default_dtype="$FLOAT_TYPE" \
     --energy_key="REF_energy" \
     --forces_key="REF_forces" \
+    --stress_key="REF_stress" \
     --atomic_numbers="$ATOMIC_NUMBERS" \
     --E0s="$E0_VALUES" \
     --model="MACELES" \
-    --forces_weight=100 \
-    --energy_weight=1 \
-    --stress_weight=0 \
+    --forces_weight="$FORCES_WEIGHT" \
+    --energy_weight="$ENERGY_WEIGHT" \
+    --stress_weight="$STRESS_WEIGHT" \
     --r_max="$R_MAX" \
     --batch_size="$BATCH_SIZE" \
     --valid_batch_size="$BATCH_SIZE" \
@@ -261,9 +269,9 @@ mace_run_train \
     --patience="$PATIENCE" \
     --swa \
     --start_swa "$SWA_START" \
-    --swa_energy_weight=5 \
-    --swa_forces_weight=100 \
-    --swa_stress_weight=0 \
+    --swa_energy_weight="$ENERGY_SWA" \
+    --swa_forces_weight="$FORCES_SWA" \
+    --swa_stress_weight="$STRESS_SWA" \
     --multiheads_finetuning=True \
     --pt_train_file="mp" \
     --num_samples_pt="$NUM_SAMPLES_PT" \
