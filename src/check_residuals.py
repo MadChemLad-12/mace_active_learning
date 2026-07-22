@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
-from patches import apply_dftd3_cell_patch
+from MACE_CP2K_pipeline.src.patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 APPLY_D3 = True
 import json

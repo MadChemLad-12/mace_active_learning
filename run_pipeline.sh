@@ -32,7 +32,7 @@ run_training_round() {
     # Step 1: geo-opt + NEB
     if [ "$GEO_OPT_RUN" = "True" ]; then
         echo "Running geometry optimizations and NEB..."
-        python "${MACE_PATH}neb_geo_run.py" "${NEB_ARGS[@]}"       
+        python "${MACE_PATH}src/neb_geo_run.py" "${NEB_ARGS[@]}"       
         echo "Geo opt and NEB finished"
         big_gap
     fi
@@ -43,7 +43,7 @@ run_training_round() {
 
     if [ "$PIPELINE_RUN" = "True" ]; then
         echo "Running active learning pipeline..."
-        python "${MACE_PATH}active_pipeline.py" \
+        python "${MACE_PATH}src/active_pipeline.py" \
         "${PIPE_ARGS[@]}" \
         --runs "${RUNS}" \
         --model "${FOUNDATION}" \
@@ -64,21 +64,18 @@ run_training_round() {
 
     # Step 4: parse DFT & Build Data
     echo "Parsing DFT results for round $ROUND..."
-    python ${MACE_PATH}active_pipeline.py --parse-all
+    python ${MACE_PATH}src/active_pipeline.py --parse-all
     cp master_train_pool.xyz "master_train_pool_${ROUND}_backup.xyz"
 
-    echo
+    big_gap
     echo "Checking residuals..."
-    python ${MACE_PATH}check_residuals.py
+    python ${MACE_PATH}src/check_residuals.py
 
     # Step 5: Retrain MACE
-    echo
-    # Bugged atm
-    #echo "Checking dataset compusition"
-    #python ${MACE_PATH}active_learning/pool_coverage.py
-    python ${MACE_PATH}compare_models.py --make-held-out
+    big_gap
+    python ${MACE_PATH}analysis/compare_models.py --make-held-out
 
-    echo
+    big_gap
     echo "Retraining MACE model..."
     bash "${MACE_PATH}train_active_learning.sh" \
     --round "$ROUND" \
@@ -88,14 +85,14 @@ run_training_round() {
     # Step 6: Compare
     if [ "$COMPARE_MODELS" = "True" ]; then
         echo comparing models and analyzing results...
-        python ${MACE_PATH}compare_models.py --outdir comparison_results_val --test fps_validate_frames_corrected.xyz --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
-        python ${MACE_PATH}compare_models.py --outdir comparison_results --test held_out.xyz --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
+        python ${MACE_PATH}analysis/compare_models.py --outdir comparison_results_val --test fps_validate_frames_corrected.xyz --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
+        python ${MACE_PATH}analysis/compare_models.py --outdir comparison_results --test held_out.xyz --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
         big_gap
     fi  
 
 
     echo Checking the loss function and best performing instances
-    python ${MACE_PATH}plotloss.py --log pipeline_$ROUND.log --head Default --out comparison_results/
+    python ${MACE_PATH}analysis/plotloss.py --log pipeline_$ROUND.log --head Default --out comparison_results/
 
     local END_TIME=$(date +%s)
     local TIMETAKEN=$(( (END_TIME - START_TIME) / 60))

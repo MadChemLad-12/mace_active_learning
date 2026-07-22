@@ -58,7 +58,7 @@ import os
 from ase.config import cfg
 from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
-from patches import apply_dftd3_cell_patch
+from MACE_CP2K_pipeline.src.patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 
 # ==============================================================================
@@ -69,7 +69,7 @@ DEVICE          = "cuda"                     # "cuda" or "cpu"
 DTYPE           = "float32"                  # Match your model's dtype
 NODES           = 6                          # For parallel processing (if used)
 OUTPUT_DIR      = "geo_opt_results"          # Where to save optimised structures
-PATH_CSV = os.environ.get("MACE_DEFAULT_CSV", "configs.csv")
+PATH_CSV = os.environ.get("MACE_DEFAULT_CSV", "configs/configs.csv")
 
 # Geometry optimisation settings
 FMAX            = 0.05     # Force convergence threshold (eV/Å)

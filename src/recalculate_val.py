@@ -40,7 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Import directly since it's in the same folder
-from active_pipeline import (
+from MACE_CP2K_pipeline.src.active_pipeline import (
     write_cp2k_sp,
     parse_cp2k_sp_results,
     parse_stress_from_out,

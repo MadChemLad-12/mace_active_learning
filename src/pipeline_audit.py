@@ -36,11 +36,11 @@ from sklearn.preprocessing import normalize
 from ase.config import cfg
 from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
-from patches import apply_dftd3_cell_patch
+from MACE_CP2K_pipeline.src.patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 
 # Import functions and configurations from your active learning pipeline ecosystem
-from active_pipeline  import (
+from MACE_CP2K_pipeline.src.active_pipeline  import (
     APPLY_D3, write_cp2k_sp, POOL_FILE, CP2K_TIMEOUT,
     parse_cell_from_out, parse_positions_from_out, 
     _write_submission_script, parse_stress_from_out
@@ -183,7 +183,7 @@ def force_insert_cp2k_output(out_file_path, destination="master"):
     # Handle structural validation layer required specifically for training clean records
     if destination == "clean":
         print("  [→] Aligning MACE baseline residuals for training compatibility...")
-        from active_pipeline import MODEL_PATH
+        from MACE_CP2K_pipeline.src.active_pipeline import MODEL_PATH
         try:
             calc_mace = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
             if APPLY_D3:
