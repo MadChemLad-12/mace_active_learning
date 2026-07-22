@@ -1,4 +1,4 @@
-name: mace_test
+name: mace_env
 channels:
   - conda-forge
   - defaults
