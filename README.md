@@ -44,7 +44,7 @@ The pipeline generates training data by running geometry optimisations and NEB (
                                │
        ┌───────────────────────▼──────────────────────────┐
        │  Step 1: neb_geo_run.py                           │
-       │  GeoOpt + NEB + optional PLUMED sampling          │
+       │  GeoOpt + NEB + optional AIMD sampling          │
        │  → geo_opt_results/al_candidates/*.extxyz         │
        └───────────────────────┬──────────────────────────┘
                                │
@@ -98,7 +98,7 @@ mace_active_learning/
 ├── run_pipeline.sh             # Master orchestration script — start here
 ├── train_active_learning.sh    # MACE training script (edit hyperparameters here)
 │
-├── neb_geo_run.py              # Geometry optimisation, NEB, PLUMED sampling
+├── neb_geo_run.py              # Geometry optimisation, NEB, AIMD sampling
 ├── active_pipeline.py          # Frame selection, CP2K input writing, DFT parsing
 ├── check_residuals.py          # Dataset quality filter
 ├── compare_models.py           # Model comparison and validation plots
@@ -110,7 +110,7 @@ mace_active_learning/
 ├── configs.csv                 # YOUR SYSTEM DEFINITIONS — edit this
 ├── E0s.json                    # Isolated-atom DFT reference energies (eV)
 │
-├── environment.yml             # Conda environment (full pinned spec)
+├── mace_env.yaml               # Conda environment (full pinned spec)
 ├── pip_requirements.txt        # pip-only packages (use with conda base)
 └── README.md
 ```
@@ -129,8 +129,8 @@ mace_active_learning/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_ORG/mace_active_learning.git
-cd mace_active_learning
+git clone https://github.com/MadChemLad-12/mace_active_learning
+cd MACE_CP2K_pipeline
 ```
 
 ### 2. Create the conda environment
@@ -138,8 +138,8 @@ cd mace_active_learning
 The full pinned environment (recommended for reproducibility):
 
 ```bash
-conda env create -f environment.yml
-conda activate mace_pt
+conda env create -f mace_env.yaml
+conda activate mace_env
 ```
 
 Or a minimal install using pip on top of an existing PyTorch environment:
@@ -152,6 +152,9 @@ pip install -r pip_requirements.txt
 ### 3. Set environment variables
 
 Add the following to your `~/.bashrc` (or equivalent):
+You can quickly do this using export config.local.sh
+
+Or manually through below
 
 ```bash
 # Path to your CP2K data files (BASIS_MOLOPT, GTH_POTENTIALS, dftd3.dat)
@@ -165,8 +168,9 @@ export MACE_FOUNDATION_MODEL="/path/to/mace-mp-0b3-medium-float32.model"
 
 ```bash
 # From the MACE-MP project — choose float32 for training stability
-wget https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b3/mace-mp-0b3-medium-float32.model
+wget https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b3/mace-mp-0b3-medium.model
 ```
+Converting to float32 is not necessary but reduces the size on disk.
 
 ---
 
@@ -177,15 +181,17 @@ wget https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b3/mace-mp-0b
 #    (See "Step 0" below for format details)
 
 # 2. Edit the "USER CONFIGURATION" block at the top of active_pipeline.py
-#    Set your element list, KIND_PARAMS, and DEFAULT_CELLS
+#    Set your element list, KIND_PARAMS, DEFAULT_CELLS, and etc
 
 # 3. Edit E0s.json with your isolated-atom CP2K energies
 #    (or let the pipeline generate them automatically on Round 1)
 
-# 4. Edit train_active_learning.sh — set ATOMIC_NUMBERS and E0_VALUES
+# 4. Edit check_residual.py — set for you ideal force and energy ranges to prevent unphysical structures for training
 
-# 5. Run Round 1
-export R=1
+# 5. Edit train_active_learning.sh for your MACE training parameters
+
+# 6. Edit run_pipeline.sh for your prefered settings
+
 bash run_pipeline.sh 2>&1 | tee pipeline_1.log
 ```
 
@@ -218,11 +224,11 @@ BulkWater,structures/water_box.pdb,
 Reads `configs.csv` and for each system:
 1. Runs BFGS/FIRE geometry optimisation on both the initial and final structures.
 2. (Optional) Runs CI-NEB between optimised endpoints.
-3. (Optional, Round ≥ 3) Runs PLUMED Langevin MD to sample rare configurations.
+3. (Optional, Round ≥ 2) Runs AIMD Langevin MD to sample rare configurations.
 4. Writes tagged `.extxyz` files to `geo_opt_results/al_candidates/`:
    - `mace_geoopt_{name}.extxyz` — optimised endpoints
    - `mace_neb_{name}.extxyz` — all NEB images
-   - `mace_plumed_{name}.extxyz` — PLUMED frames (if enabled)
+   - `mace_AIMD_{name}.extxyz` — AIMD frames (if enabled)
 
 **Key settings to edit in `neb_geo_run.py`:**
 
@@ -232,7 +238,8 @@ Reads `configs.csv` and for each system:
 | `FMAX` | `0.05` | Force convergence threshold (eV/Å) |
 | `N_IMAGES` | `10` | Number of NEB images |
 | `SKIP_NEB` | `False` | Skip NEB (set `True` for Round 1) |
-| `SKIP_PLUMED` | `True` | Skip PLUMED (enable from Round 3+) |
+| `SKIP_AIMD` | `True` | Skip AIMD (enable from Round 2+) |
+| `AIMD_TARGET` | `initial` | Picks the csv structure to run the AIMD simulation |
 | `FIX_BY_HEIGHT` | `False` | Fix atoms below `FIX_HEIGHT_THRESHOLD` |
 
 ---
@@ -255,7 +262,7 @@ Reads `configs.csv` and for each system:
 
 ```python
 # ── Elements ──────────────────────────────────────────────────────────
-Z_MAP = {"H": 1, "C": 6, "O": 8, "F": 9, "S": 16, "Pt": 78}  # Add yours
+# Will attempt to read from E0s.json file
 
 # ── CP2K KIND parameters per element ──────────────────────────────────
 KIND_PARAMS = {
@@ -264,15 +271,18 @@ KIND_PARAMS = {
     "Pt": ("DZVP-MOLOPT-SR-GTH",      "GTH-PBE-q18"),
     # Add all elements present in your systems
 }
+# If not manually listed it will attempt to find 
+#  equivalents
 
 # ── Default cell sizes for systems without periodic boundary info ──────
 DEFAULT_CELLS = {
     "default":    (20.0, 20.0, 20.0),  # fallback — large vacuum box
-    "MySlab_OH":  (11.1, 9.6,  33.0),  # a, b, c in Angstrom
+    "Mystructure":  (11.1, 9.6,  33.0),  # a, b, c in Angstrom
 }
 
 # ── How many frames to submit to CP2K per round ───────────────────────
 N_SELECT_TOTAL = 200
+# can by selected in the run_pipeline.sh file
 
 # ── Exclude system names containing these keywords ────────────────────
 EXCLUDE_SYSTEM_KEYWORDS = []
@@ -324,6 +334,7 @@ Filters `master_train_pool.xyz` for:
 
 Outputs: `training_clean.xyz` (pass) and `training_bad.xyz` (fail).
 
+NOTE: You may need to edit these values manually to ensure they are right for your system
 ---
 
 ### Step 6 — Retrain MACE
@@ -341,8 +352,8 @@ Key parameters to set:
 
 | Variable | Description |
 |---|---|
-| `ATOMIC_NUMBERS` | List of atomic numbers present in your data, e.g. `"[1, 6, 8, 9, 16, 78]"` |
-| `E0_VALUES` | Your CP2K isolated-atom energies — must match `E0s.json` |
+| `ATOMIC_NUMBERS` | List of atomic numbers present in your data (will be read from your `E0s.json`), e.g. `"[1, 6, 8, 9, 16, 78]"` |
+| `E0_VALUES` | Your CP2K isolated-atom energies generated from `E0s.json` |
 | `MAX_EPOCHS` | Training epochs (200 is a good starting point) |
 | `SWA_START` | When to switch to SWA/Stage-2 loss (typically ~75% of `MAX_EPOCHS`) |
 | `BATCH_SIZE` | Reduce if you hit OOM errors; increase if GPU is underutilised |
@@ -360,11 +371,13 @@ The script runs four sub-steps automatically:
 
 ```bash
 # Create a held-out set (once, after Round 1)
+# Good practice to delete the old held-out.xyz if a large number of structures are added
 python compare_models.py --make-held-out
 
 # Compare all rounds against held-out set
 python compare_models.py --test held_out.xyz --outdir comparison_results/  --model MACE.model
 # You can also use you own data set that the model hasn't seen to check for overtraining
+# This is highly recommeded to prevent over training
 
 # Plot training curves
 python plotloss.py --log pipeline_1.log --head Default --out comparison_results/
@@ -383,11 +396,10 @@ Edit the configuration block near the bottom of the file for each round:
 ```bash
 R=1                          # Round number
 GEO_OPT_RUN="True"           # Run neb_geo_run.py?
-SKIP_OPT="False"             # Skip geometry optimisation inside neb_geo_run.py?
 SKIP_NEB="True"              # Skip NEB? (recommended for Round 1)
 SKIP_PLM="True"              # Skip PLUMED? (recommended as it is work in progress)
+SKIP_AIMD="TRUE"             # Skip AIMD?
 PIPELINE_RUN="True"          # Run active_pipeline.py (frame selection)?
-DISSOLVED="False"            # Include dissolved-species MD trajectories? Feature has been removed as it was only for my training
 CP2K_RUN="True"              # Run CP2K jobs?
 RUNS="150"                   # N_SELECT_TOTAL passed to active_pipeline.py (number of cp2k jobs)
 COMPARE_MODELS="True"        # Run compare_models.py after training?
@@ -410,7 +422,7 @@ EXCLUDE_KEYWORDS=""          # system_type keywords to drop, e.g. "DRY WET" Thes
 | `CLIMB` | `True` | CI-NEB: finds exact transition state |
 | `FIX_BY_HEIGHT` | `False` | Fix bottom slab layers |
 | `FIX_HEIGHT_THRESHOLD` | `2.7` Å | Atoms below this Z are frozen |
-
+| `APPLY_D3` | `TRUE` | Adds D3 dispersion correction to mace model |
 ---
 
 ### `active_pipeline.py` — selection and CP2K settings
@@ -423,15 +435,13 @@ EXCLUDE_KEYWORDS=""          # system_type keywords to drop, e.g. "DRY WET" Thes
 | `REUSE_EXISTING_CP2K` | `True` | Skip already-computed geometries |
 | `CP2K_TIMEOUT` | `"4h"` | Per-job timeout string |
 | `LIBDIR` | env `CP2K_LIBDIR` | Path to CP2K basis set library |
-
+| `REICON_SAMPLEING` | `TRUE` | Turns on REICO data set generation for a more diverse dataset |
 ---
 
 ### `train_active_learning.sh` — training hyperparameters
 
 | Variable | Typical value | Notes |
 |---|---|---|
-| `ATOMIC_NUMBERS` | `"[1, 6, 8, 9, 16, 78]"` | Must include all elements in training data |
-| `E0_VALUES` | see file | Must match CP2K isolated-atom calculations |
 | `MAX_EPOCHS` | `200` | Increase for later rounds |
 | `SWA_START` | `150` | Stage 2 / SWA starts here |
 | `PATIENCE` | `50` | Early stopping patience |
@@ -440,6 +450,7 @@ EXCLUDE_KEYWORDS=""          # system_type keywords to drop, e.g. "DRY WET" Thes
 | `BATCH_SIZE` | `2` | Reduce if GPU OOM |
 | `NUM_SAMPLES_PT` | `900` | Materials Project frames for multi-head |
 | `VALIDATION_FRACTION` | `0.2` | Fraction of training data held out during training |
+| `*_WEIGHTS` `*_SWA` | `number` | Weights for training the mace model for pre and post SWA set |
 
 ---
 
@@ -557,3 +568,59 @@ This is expected after many rounds. It can be safely deleted and will be rebuilt
 4. Open a pull request with a short description of the change and any relevant test results.
 
 Please open an issue before starting large refactors.
+
+
+## Notes & Citation
+
+This repository supports my ongoing work on the **Pt–Nafion interface**, studying Pt dissolution 
+mechanisms in PEM fuel cells using active-learning MACE machine-learned interatomic potentials (MLIPs).
+
+If you're interested in this type of MACE model or dataset (Pt–Nafion–water interface), feel free to 
+reach out — I'm happy to share the data or model from my most accurate iteration.
+
+**A related publication is in preparation and will be linked here once released.**
+
+### Citing this work
+
+If you use this repository in your research, please cite it and reference the associated publication 
+(to be added) in your acknowledgments/credits.
+
+### Related work to cite
+
+This pipeline builds on and/or was benchmarked against the following methods and tools. If you use 
+this code, please also cite the relevant sources below depending on which components you use:
+
+**MACE**
+> Batatia, I., Kovács, D. P., Simm, G. N. C., Ortner, C., & Csányi, G. (2022). 
+> MACE: Higher Order Equivariant Message Passing Neural Networks for Fast and Accurate Force Fields. 
+> *Advances in Neural Information Processing Systems*, 35.
+> https://github.com/ACEsuit/mace
+
+**OC25**
+> Sahoo, S. J., Maraschin, M., Levine, D. S., Ulissi, Z., Zitnick, C. L., Varley, J. B., Gauthier, J. A., 
+> Govindarajan, N., & Shuaibi, M. (2025). The Open Catalyst 2025 (OC25) Dataset and Models for 
+> Solid-Liquid Interfaces. https://arxiv.org/abs/2509.17862
+
+**CSIRO Platinum Nanoparticle Data Set**
+> Barnard, A., Sun, B., & Opletal, G. (2018). Platinum Nanoparticle Data Set. v2. CSIRO. 
+> Data Collection. https://doi.org/10.25919/5d3958d9bf5f7
+
+**MPtrj (Materials Project)**
+> Horton, M. K., Huck, P., Yang, R. X., Munro, J. M., Dwaraknath, S., Ganose, A. M., Kingsbury, R. S., 
+> Wen, M., Shen, J. X., Mathis, T. S., Kaplan, A. D., Berket, K., Riebesell, J., George, J., Rosen, A. S., 
+> Spotte-Smith, E. W. C., McDermott, M. J., Cohen, O. A., Dunn, A., Kuner, M. C., Rignanese, G.-M., 
+> Petretto, G., Waroquiers, D., Griffin, S. M., … Persson, K. A. (2025). Accelerated data-driven 
+> materials science with the Materials Project. *Nature Materials*, 24, 1522–1532. 
+> https://www.nature.com/articles/s41563-025-02272-0
+
+**Nudged Elastic Band (NEB)**
+> Henkelman, G., Uberuaga, B. P., & Jónsson, H. (2000). A climbing image nudged elastic band 
+> method for finding saddle points and minimum energy paths. *The Journal of Chemical Physics*, 113(22), 9901–9904.
+>
+> Henkelman, G., & Jónsson, H. (2000). Improved tangent estimate in the nudged elastic band 
+> method for finding minimum energy paths and saddle points. *The Journal of Chemical Physics*, 113(22), 9978–9985.
+
+**ASE (Atomic Simulation Environment)**
+> Larsen, A. H., et al. (2017). The atomic simulation environment—a Python library for working 
+> with atoms. *Journal of Physics: Condensed Matter*, 29(27), 273002.
+> https://wiki.fysik.dtu.dk/ase/
