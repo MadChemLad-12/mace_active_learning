@@ -49,7 +49,7 @@ from ase.io import read, write
 from ase.units import Hartree, Bohr
 from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
-from MACE_CP2K_pipeline.src.patches import apply_dftd3_cell_patch
+from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 
 # ============================================================
