@@ -50,6 +50,8 @@ from ase.units import Hartree, Bohr
 from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
+import glob
+from pathlib import Path
 apply_dftd3_cell_patch()
 
 # ============================================================
@@ -66,7 +68,7 @@ AL_INPUT_DIR  = "geo_opt_results/al_candidates"
 
 # How many frames to send to CP2K per round (total across all systems)
 N_SELECT_TOTAL = 100
-MAX_ATOMS = 350.0 # This is to prevent the data set becoming too large and wasting gpu
+MAX_ATOMS = 450.0 # This is to prevent the data set becoming too large and wasting gpu
 REUSE_EXISTING_CP2K = True # If true, skip writing inputs for frames that already have valid CP2K outputs (useful for iterative rounds)
 EXCLUDE_SYSTEM_KEYWORDS = [] 
 
@@ -115,10 +117,10 @@ EXTERNAL_SOURCES = {
 
 REICO_SAMPLEING = True
 # --- REICO (random imaginary-chemical box) sampling config ---
-REICO_NUM            = 100     # number of random boxes generated per round
+REICO_NUM            = 50     # number of random boxes generated per round
 REICO_MIN_ATOMS      = 20
-REICO_MAX_ATOMS      = 50
-REICO_VOL_PER_ATOM   = 16.0   # Å³/atom -- rough condensed-phase packing density,
+REICO_MAX_ATOMS      = 60
+REICO_VOL_PER_ATOM   = 12.0   # Å³/atom -- rough condensed-phase packing density,
                                # box edge is derived from this + n_atoms so boxes
                                # stay dense rather than dilute-gas-like
 REICO_MIN_DIST_SCALE = 0.6    # scales (covalent_radius_a + covalent_radius_b) to
@@ -130,6 +132,10 @@ CP2K_DIR   = f"cp2k_sp_round{ROUND}"
 POOL_FILE  = "master_train_pool.xyz"
 CP2K_TIMEOUT = "3h"  # Per-job timeout for CP2K runs (adjust as needed)
 FAILED_LOG = f"{CP2K_DIR}/failed_jobs.txt"   # written by your timeout wrapper
+
+# Populated in __main__ when --ignore-failed is passed; read by write_all_sp_inputs()
+# so run_round() (which takes no args) can honor it without threading params everywhere.
+IGNORE_FAILED_NAMES = set()
 
 # E0s Json
 E0_JSON = "E0s.json"
@@ -383,7 +389,7 @@ CP2K_TEMPLATE = """\
         METHOD BROYDEN_MIXING
         ALPHA 0.1
         BETA 1.0
-        NBROYDEN 12
+        NBROYDEN 4
       &END MIXING
       &DIAGONALIZATION
         ALGORITHM STANDARD
@@ -583,6 +589,73 @@ def _save_geometry_index(cp2k_dir, index):
     with open(GLOBAL_GEOM_INDEX, "w") as f:
         json.dump(index, f, indent=2)
 
+def scan_and_report_failed_jobs(target_round, ignore_failed=False):
+    """
+    Pre-scans the CP2K directory for the target round before trajectory loading.
+    Identifies non-converged/failed jobs and tracks them.
+    """
+    cp2k_dir = Path(f"cp2k_sp_round{target_round}")
+    
+    if not cp2k_dir.exists():
+        return set()
+
+    out_files = sorted(glob.glob(os.path.join(cp2k_dir, "*.out")))
+    ignored_jobs = set()
+    
+    print("\n" + "="*60)
+    print(f"  Pre-execution Check: CP2K Outputs (Round {target_round})")
+    print("="*60)
+
+    for out_file in out_files:
+        # Check if CP2K run finished successfully
+        if not _cp2k_output_is_complete(out_file):
+            job_name = Path(out_file).stem
+            ignored_jobs.add(job_name)
+            
+            if ignore_failed:
+                print(f"  [IGNORE] Failed/Incomplete CP2K job flagged: {job_name}")
+
+    if ignore_failed and ignored_jobs:
+        print(f"\n[→] Remembered {len(ignored_jobs)} failed jobs from Round {target_round}. These will be skipped.")
+    elif not ignored_jobs:
+        print(f"[✓] All existing CP2K outputs in {cp2k_dir} are clean/completed.")
+    print("="*60 + "\n")
+
+    return ignored_jobs
+
+def load_failed_job_names(cp2k_dir):
+    """
+    Parse failed_jobs.txt in the given cp2k round directory and return a set
+    of bare job names (NOT the r*_*.inp filename, no path, no extension).
+
+    Handles all the formats your timeout/memory wrapper writes, e.g.:
+        FAILED: sp_Dry0.0Pt_r1_0003
+        MEMKILL: sp_Dry0.0Pt_r1_0003
+        FAILED (timeout): sp_Dry0.0Pt_r1_0003
+        FAILED (crash exit=1): sp_Dry0.0Pt_r1_0003
+    """
+    failed_log = Path(cp2k_dir) / "failed_jobs.txt"
+    names = set()
+
+    if not failed_log.exists():
+        return names
+
+    with open(failed_log) as f:
+        for line in f:
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            # Name is always the text after the LAST colon on the line
+            raw_name = line.rsplit(":", 1)[-1].strip()
+            if not raw_name:
+                continue
+            # Defensive: strip any path / .inp / .out extension if present
+            raw_name = Path(raw_name).stem
+            if raw_name:
+                names.add(raw_name)
+
+    return names
+
 def _cp2k_output_is_complete(outfile):
     """
     Return True if a CP2K .out file exists, is non-empty, contains a parsed
@@ -712,7 +785,7 @@ trap cleanup INT TERM
             f.write(header)
         f.write("\n".join(job_blocks))
 
-def write_all_sp_inputs(selected_frames, cp2k_dir):
+def write_all_sp_inputs(selected_frames, cp2k_dir, ignore_names=None):
     """
     Write CP2K single-point input files and submission scripts.
 
@@ -732,10 +805,20 @@ def write_all_sp_inputs(selected_frames, cp2k_dir):
       This catches NEB images that appear in multiple rounds or dissolved
       frames that happen to be identical.
 
+    ignore_names (set, optional):
+        Bare job names (from failed_jobs.txt, see load_failed_job_names) that
+        should be permanently excluded from submit_missing.sh — e.g. jobs that
+        already failed with a timeout/OOM and shouldn't just get re-queued
+        every round. If not given, falls back to the module-level
+        IGNORE_FAILED_NAMES set (populated in __main__ via --ignore-failed).
+
     submit_all.sh    — every job (use for forced full rerun)
     submit_missing.sh — only genuinely new jobs (use day-to-day)
     """
     os.makedirs(cp2k_dir, exist_ok=True)
+
+    if ignore_names is None:
+        ignore_names = IGNORE_FAILED_NAMES
 
     # Load existing hash index (may be empty on first run)
     geom_index   = _load_geometry_index(cp2k_dir) if REUSE_EXISTING_CP2K else {}
@@ -754,11 +837,18 @@ def write_all_sp_inputs(selected_frames, cp2k_dir):
     reused_direct  = 0
     reused_hash    = 0
     reused_pool    = 0   
+    skipped_ignored = 0
     new_index      = dict(geom_index)   # will be updated and saved at the end
 
     for i, atoms in enumerate(selected_frames):
         sys_type = atoms.info.get("system_type", "unknown")
         name     = f"sp_{sys_type}_r{ROUND}_{i:04d}"
+
+        if ignore_names and name in ignore_names:
+            skipped_ignored += 1
+            print(f"  [⊘] {name}: matches failed_jobs.txt — skipped as submit_missing.sh candidate")
+            continue
+
         inp      = write_cp2k_sp(atoms, name, cp2k_dir)
         all_jobs.append((name, inp))
         expected_out = Path(cp2k_dir) / f"{name}.out"
@@ -812,6 +902,8 @@ def write_all_sp_inputs(selected_frames, cp2k_dir):
 
     print(f"\n[✓] CP2K input summary:")
     print(f"    Total frames:          {n_total}")
+    if ignore_names:
+        print(f"    Skipped (failed_jobs.txt match): {skipped_ignored}")
     if REUSE_EXISTING_CP2K:
         print(f"    Skipped (direct):      {reused_direct}  (.out already present)")
         print(f"    Skipped (hash match):  {reused_hash}  (identical geometry seen before)")
@@ -1026,7 +1118,8 @@ def audit_and_requeue_specific_jobs(target_keywords, target_round=None, requeue=
     elif requeue and not needs_rerun:
         print("\n[✓] Audit finished. No failed or missing jobs found to requeue.")
 
-def recover_and_prioritize_missing(target_round=None, n_runs=100):
+def recover_and_prioritize_missing(target_round=None, n_runs=100, ignore_failed=False,
+                                    ignore_failed_by_name=False):
     """
     Analyzes all previously queued frames that failed or went missing,
     compares them to the current successful POOL_FILE using Farthest 
@@ -1036,6 +1129,12 @@ def recover_and_prioritize_missing(target_round=None, n_runs=100):
     Args:
         target_round (int, optional): Restrict scan to a specific round.
         n_runs (int): Number of inputs to generate.
+        ignore_failed (bool): If True, only collect completely missing outputs
+            (skip anything that has any .out file at all, failed or not).
+        ignore_failed_by_name (bool): If True, read failed_jobs.txt for each
+            round and permanently exclude any candidate whose bare job name
+            (e.g. "sp_Dry0.0Pt_r1_0003", NOT the r*_*.inp filename) appears
+            there — even if it would otherwise be picked up as "missing".
     """
     import glob
     from sklearn.preprocessing import normalize
@@ -1044,6 +1143,8 @@ def recover_and_prioritize_missing(target_round=None, n_runs=100):
     print(f"  Missing Structure Recovery & FPS Prioritization")
     print(f"  Target Round : {target_round if target_round else 'All Rounds'}")
     print(f"  Requested    : {n_runs} runs")
+    print(f"  Ignore Failed: {ignore_failed} ")
+    print(f"  Ignore-by-name (failed_jobs.txt): {ignore_failed_by_name}")
     print("="*60)
     
     if Path(POOL_FILE).exists():
@@ -1060,7 +1161,11 @@ def recover_and_prioritize_missing(target_round=None, n_runs=100):
             
     missing_frames = []
     total_queued = 0
-    
+    skipped_by_name = 0
+
+    # Cache failed_jobs.txt names per round so we only read each file once
+    failed_names_by_round = {}
+
     for al_file in al_files:
         if not os.path.exists(al_file):
             print(f"  [!] AL file not found: {al_file} — skipping")
@@ -1070,15 +1175,33 @@ def recover_and_prioritize_missing(target_round=None, n_runs=100):
         r_num = int(m.group(1)) if m else ROUND
         frames = read(al_file, index=":")
         total_queued += len(frames)
-        
+
+        if ignore_failed_by_name and r_num not in failed_names_by_round:
+            failed_names_by_round[r_num] = load_failed_job_names(f"cp2k_sp_round{r_num}")
+            n_found = len(failed_names_by_round[r_num])
+            if n_found:
+                print(f"  [→] Loaded {n_found} failed job name(s) from cp2k_sp_round{r_num}/failed_jobs.txt to ignore")
+
         for i, atoms in enumerate(frames):
             sys_type = atoms.info.get("system_type", "unknown")
             name = f"sp_{sys_type}_r{r_num}_{i:04d}"
             out_file = Path(f"cp2k_sp_round{r_num}") / f"{name}.out"
 
-            # Check if the output is completely missing or failed SCF
-            if not _cp2k_output_is_complete(out_file):
-                missing_frames.append((name, atoms, r_num))
+            if ignore_failed_by_name and name in failed_names_by_round.get(r_num, set()):
+                skipped_by_name += 1
+                continue
+
+            if ignore_failed:
+                # Only collect if the file doesn't exist at all (ignore failed/incomplete ones)
+                if not out_file.exists():
+                    missing_frames.append((name, atoms, r_num))
+            else:
+                # Default: collect both completely missing AND failed/incomplete runs
+                if not _cp2k_output_is_complete(out_file):
+                    missing_frames.append((name, atoms, r_num))
+
+    if ignore_failed_by_name and skipped_by_name:
+        print(f"[→] Skipped {skipped_by_name} candidate(s) matching names in failed_jobs.txt.")
 
     if not missing_frames:
         print(f"\n[✓] Excellent! 0 out of {total_queued} expected outputs are missing.")
@@ -1325,11 +1448,11 @@ def is_physically_reasonable(atoms, calc, round_num=1, check_slab_z=False, force
     """
     Screen a candidate frame for physical reasonableness before
     submitting to CP2K. Returns (is_ok, reason_if_rejected).
-    
-    Uses three checks:
-    1. Minimum interatomic distances (catches overlapping atoms)
-    2. Maximum interatomic distances for bonded pairs (catches dissolved atoms)  
-    3. MACE per-atom force outlier detection (catches unphysical environments)
+    ...
+    forces : np.ndarray, optional
+        Pre-computed (N,3) force array, if already available from a prior
+        MACE evaluation on this exact geometry. Skips redundant inference
+        in Check 3 when provided.
     """
     from ase.neighborlist import neighbor_list
     import numpy as np
@@ -2374,9 +2497,16 @@ if __name__ == "__main__":
     import argparse
     from pathlib import Path
     parser = argparse.ArgumentParser(description="MACE Active Learning Pipeline")
+    apply_dftd3_cell_patch()
     
     # This allows you to call: python active_pipeline.py round 1
     parser.add_argument("--parse",     action="store_true")
+    parser.add_argument("--ignore_failed", action="store_true",
+    help="Ignore failed jobs during recovery and focus purely on unstarted/missing candidates")
+    parser.add_argument("--ignore-failed", dest="ignore_failed_names", action="store_true",
+    help="Read failed_jobs.txt for the relevant round(s) and permanently skip any candidate "
+        "whose bare job name (not the r*_*.inp filename) appears there, when building "
+        "submit_missing.sh during --recover")
     parser.add_argument("--reparse",   action="store_true")
     parser.add_argument("--e0",        action="store_true")
     parser.add_argument("--parse-all", action="store_true", dest="parse_all")
@@ -2399,6 +2529,32 @@ if __name__ == "__main__":
     parser.add_argument("round_num", type=int, nargs="?", default=None, help="Round number (optional)")  
     
     args = parser.parse_args()
+    ROUND = args.target if args.target is not None else 1    
+    CP2K_DIR = f"cp2k_sp_round{ROUND}"
+
+    print(f"[→] Round {ROUND}  |  Model: {args.model}  |  CP2K dir: {CP2K_DIR}")
+    print("Starting execution for round context...\n")
+
+    # -------------------------------------------------------------
+    # PRE-SCAN STEP: Pre-check and print ignored/failed frames FIRST
+    # -------------------------------------------------------------
+    ignored_set = scan_and_report_failed_jobs(ROUND, ignore_failed=args.ignore_failed)
+
+    if args.ignore_failed_names:
+        IGNORE_FAILED_NAMES = load_failed_job_names(CP2K_DIR)
+        if IGNORE_FAILED_NAMES:
+            print(f"[→] --ignore-failed: loaded {len(IGNORE_FAILED_NAMES)} name(s) from "
+                  f"{CP2K_DIR}/failed_jobs.txt — these will be skipped as submit_missing.sh candidates.")
+        else:
+            print(f"[→] --ignore-failed: no failed_jobs.txt entries found in {CP2K_DIR} yet.")
+
+    # -------------------------------------------------------------
+    # REGULAR LEARNING / LOADING LOOP
+    # -------------------------------------------------------------
+    print("="*60)
+    print(f"  Active Learning Round {ROUND}")
+    print(f"  Model: {args.model}")
+    print("="*60)    
     
    # 1. Handle global parameters first (Unlinked from the action chain)
     if args.model:
@@ -2420,7 +2576,10 @@ if __name__ == "__main__":
                 Path(E0_DIR)/"submit_e0.sh", jobs, E0_DIR, "E0s", len(elements), 0
             )
     elif args.recover:
-        recover_and_prioritize_missing(target_round=args.target, n_runs=args.runs)    
+        recover_and_prioritize_missing(target_round=args.target, 
+                                       n_runs=args.runs,
+                                       ignore_failed=args.ignore_failed,
+                                       ignore_failed_by_name=args.ignore_failed_names)    
     elif args.audit_jobs:
         audit_and_requeue_specific_jobs(
             target_keywords=args.audit_jobs, 
