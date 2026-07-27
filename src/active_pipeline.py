@@ -136,6 +136,10 @@ FAILED_LOG = f"{CP2K_DIR}/failed_jobs.txt"   # written by your timeout wrapper
 # Populated in __main__ when --ignore-failed is passed; read by write_all_sp_inputs()
 # so run_round() (which takes no args) can honor it without threading params everywhere.
 IGNORE_FAILED_NAMES = set()
+# Populated in __main__ alongside IGNORE_FAILED_NAMES: the atom-count above
+# which future candidates are preemptively skipped as OOM-risk. None = no
+# atom-count filtering (only exact-name skipping is applied).
+MAX_ATOMS_THRESHOLD = 400
 
 # E0s Json
 E0_JSON = "E0s.json"
@@ -623,6 +627,52 @@ def scan_and_report_failed_jobs(target_round, ignore_failed=False):
 
     return ignored_jobs
 
+def estimate_oom_atom_threshold(al_file, failed_names):
+    """
+    Look at the structures that actually failed (matched by exact job name
+    against failed_names) in the given AL round file, and return the
+    smallest atom count among them.
+
+    Rationale: OOM/crash failures correlate with system size much more
+    directly than with system_type label. Using the MINIMUM size among
+    confirmed failures as the cutoff is conservative — anything at or above
+    that size gets treated as OOM-risk and preemptively skipped, even if
+    its system_type never appeared in failed_jobs.txt before.
+
+    Args:
+        al_file (str): Path to the al_selected_round{N}.xyz file the
+            candidates for this round were drawn from.
+        failed_names (set[str]): Exact job names from load_failed_job_names().
+
+    Returns:
+        int or None: Atom-count threshold, or None if no failed structures
+        could be matched (e.g. al_file missing, or none of failed_names
+        correspond to frames in this file).
+    """
+    if not failed_names or not os.path.exists(al_file):
+        return None
+
+    m = re.search(r"round(\d+)", al_file)
+    r_num = int(m.group(1)) if m else ROUND
+
+    frames = read(al_file, index=":")
+    failed_sizes = []
+
+    for i, atoms in enumerate(frames):
+        sys_type = atoms.info.get("system_type", "unknown")
+        name = f"sp_{sys_type}_r{r_num}_{i:04d}"
+        if name in failed_names:
+            failed_sizes.append(len(atoms))
+
+    if not failed_sizes:
+        return None
+
+    threshold = min(failed_sizes)
+    print(f"[→] OOM atom-count threshold estimated from {len(failed_sizes)} matched failure(s): "
+          f"{threshold} atoms (range of failed sizes: {min(failed_sizes)}-{max(failed_sizes)})")
+    return threshold
+
+
 def load_failed_job_names(cp2k_dir):
     """
     Parse failed_jobs.txt in the given cp2k round directory and return a set
@@ -838,12 +888,24 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, ignore_names=None):
     reused_hash    = 0
     reused_pool    = 0   
     skipped_ignored = 0
+    skipped_oom     = 0
     new_index      = dict(geom_index)   # will be updated and saved at the end
 
     for i, atoms in enumerate(selected_frames):
         sys_type = atoms.info.get("system_type", "unknown")
         name     = f"sp_{sys_type}_r{ROUND}_{i:04d}"
-
+        n_atoms  = len(atoms)
+        
+        # Atom-count OOM-risk filter: skip anything at/above the size seen
+        # among confirmed failures, regardless of whether this exact
+        # structure has failed before.
+        if MAX_ATOMS_THRESHOLD is not None and n_atoms >= MAX_ATOMS_THRESHOLD:
+            skipped_oom += 1
+            print(f"  [⊘] {name}: {n_atoms} atoms >= OOM threshold ({MAX_ATOMS_THRESHOLD}) — skipped")
+            continue
+        
+        # Exact-match filter: skip this specific structure if it already
+        # failed before (same sys_type + same index in this round).
         if ignore_names and name in ignore_names:
             skipped_ignored += 1
             print(f"  [⊘] {name}: matches failed_jobs.txt — skipped as submit_missing.sh candidate")
@@ -902,6 +964,8 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, ignore_names=None):
 
     print(f"\n[✓] CP2K input summary:")
     print(f"    Total frames:          {n_total}")
+    if MAX_ATOMS_THRESHOLD is not None:
+        print(f"    Skipped (OOM atom-count >= {MAX_ATOMS_THRESHOLD}): {skipped_oom}")
     if ignore_names:
         print(f"    Skipped (failed_jobs.txt match): {skipped_ignored}")
     if REUSE_EXISTING_CP2K:
@@ -2548,6 +2612,19 @@ if __name__ == "__main__":
         else:
             print(f"[→] --ignore-failed: no failed_jobs.txt entries found in {CP2K_DIR} yet.")
 
+            al_file_for_round = f"al_selected_round{ROUND}.xyz"
+            if MAX_ATOMS_THRESHOLD is not None:
+                # Manually set at the top of the file (module-level default) —
+                # respect it and skip auto-estimation entirely.
+                print(f"[→] --ignore-failed: using manually-set MAX_ATOMS_THRESHOLD = "
+                    f"{MAX_ATOMS_THRESHOLD} atoms (auto-estimate skipped).")
+            else:
+                MAX_ATOMS_THRESHOLD = estimate_oom_atom_threshold(al_file_for_round, IGNORE_FAILED_NAMES)
+                if MAX_ATOMS_THRESHOLD is None:
+                    print(f"[→] --ignore-failed: could not estimate an OOM atom-count threshold "
+                        f"(no failed names matched frames in {al_file_for_round}) — "
+                        f"falling back to exact-name skipping only.")
+            
     # -------------------------------------------------------------
     # REGULAR LEARNING / LOADING LOOP
     # -------------------------------------------------------------
