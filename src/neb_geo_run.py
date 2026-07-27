@@ -171,7 +171,7 @@ AIMD_WARMUP_TEMP = 100          # Warmup temperature in K
 # One file per system, named:  mace_geoopt_{name}.extxyz  (geo-opt frames)
 #                              mace_neb_{name}.extxyz      (NEB frames)
 AL_EXPORT_DIR = "al_candidates"  # sub-directory inside OUTPUT_DIR
-AL_EXPORT_DIR = os.path.join(OUTPUT_DIR, "al_candidates")
+AL_EXPORT_DIR = os.path.join(OUTPUT_DIR, AL_EXPORT_DIR)
 
 # ==============================================================================
 # CONFIGURATIONS — loaded from CSV
