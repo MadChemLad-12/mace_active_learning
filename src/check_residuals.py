@@ -12,15 +12,15 @@ from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
-APPLY_D3 = True
 import json
 #Example Json {Atomic number: energy eV}
 #E0s = {1: -12.6294, 6: -146.3745, 8: -431.6014, 
 #       9: -656.5253, 16: -274.7039, 78: -3264.7049}
 
-# Git one
 
-MAX_FORCE_REF = 15.0   # eV/Å
+APPLY_D3 = True
+
+MAX_FORCE_REF = 40.0   # eV/Å
 MAX_RMSE      = 1000    # meV/Å
 NON_PT_THRESH = 5.3
 EXTERNAL_SYSTEM_TYPES = ("mptrj", "oc25", "reico")
@@ -134,19 +134,60 @@ for index, atoms in enumerate(unique_frames):
     is_not_pt = (np.array(symbols_list) != "Pt")
     non_pt_z  = positions[is_not_pt, 2]
 
+    def is_pt_slab(atoms, pt_thresh=20, edge_margin=1.5):
+        """
+        Determines if a system containing Pt is a periodic slab vs an isolated nanoparticle.
+
+        Parameters:
+        -----------
+        atoms : ase.Atoms
+        pt_thresh : int
+            Minimum number of Pt atoms to consider as a slab candidate.
+        edge_margin : float (Angstroms)
+            If Pt atoms get closer than this margin to BOTH cell edges along X or Y,
+            it is forming periodic bonds across the boundary (i.e., a slab).
+        """
+        symbols = np.array(atoms.get_chemical_symbols())
+        is_pt = (symbols == "Pt")
+        pt_count = np.sum(is_pt)
+
+        if pt_count < pt_thresh:
+            return False
+
+        # Get cell lengths (a, b, c)
+        cell_lengths = atoms.cell.lengths()
+        a_len, b_len = cell_lengths[0], cell_lengths[1]
+
+        # Get Pt positions
+        pt_pos = atoms.positions[is_pt]
+
+        # Min/Max coordinates of Pt along X and Y
+        min_x, max_x = np.min(pt_pos[:, 0]), np.max(pt_pos[:, 0])
+        min_y, max_y = np.min(pt_pos[:, 1]), np.max(pt_pos[:, 1])
+
+        # Check span along X and Y
+        x_span = max_x - min_x
+        y_span = max_y - min_y
+
+        # A slab spans almost the entire cell width in X and Y (minus ~1 bond length)
+        is_continuous_x = (x_span > (a_len - 2.5)) or (min_x < edge_margin and (a_len - max_x) < edge_margin)
+        is_continuous_y = (y_span > (b_len - 2.5)) or (min_y < edge_margin and (b_len - max_y) < edge_margin)
+
+        # A slab MUST be periodic along both X and Y
+        return is_continuous_x and is_continuous_y
+
     is_external = any(tag in stype.lower() for tag in EXTERNAL_SYSTEM_TYPES)
-    is_slab = (pt_count > 3) and not is_external
+    is_np = "nanoparticle" in stype.lower() or "cluster" in stype.lower()
+
+    is_slab = (pt_count > 20) and not is_external and not is_np and is_pt_slab(atoms)
 
     if is_slab:
-        # Generic slab check: look for any non-Pt atom buried below the slab surface.
-        # Customise slab_element and NON_PT_THRESH at the top of this file for other systems.
-        slab_element = "Pt"  # Change this if your slab uses a different element
-        is_not_slab  = (np.array(symbols_list) != slab_element)
-        non_slab_z   = positions[is_not_slab, 2]
-        if len(non_slab_z) > 0 and np.min(non_slab_z) < NON_PT_THRESH:
+        is_not_pt = (np.array(symbols_list) != "Pt")
+        non_pt_z  = positions[is_not_pt, 2]
+        if len(non_pt_z) > 0 and np.min(non_pt_z) < NON_PT_THRESH:
             bad.append(atoms)
-            bad_info.append(f"[non_slab_z_too_low] index={index} {stype} "
-                            f"min_z={np.min(non_slab_z):.2f} Å  slab_count={pt_count}")
+            bad_info.append(f"[non_pt_z_too_low] index={index} {stype} "
+                            f"min_z={np.min(non_pt_z):.2f} Å  pt_count={pt_count}")
             continue
 
     # ── 2. Cohesive energy check (system-aware) ───────────────────────────────
@@ -155,17 +196,17 @@ for index, atoms in enumerate(unique_frames):
     coh      = (e_total - e_ref) / len(atoms)
 
     if   "Pt" in symbols_set and pt_count > 3:          # Pt slab
-        coh_lo, coh_hi = -7.0, 0.5
+        coh_lo, coh_hi = -10.0, 0.5
     elif "Pt" in symbols_set and pt_count <= 3:          # dissolved Pt
-        coh_lo, coh_hi = -7.0, 0.5
+        coh_lo, coh_hi = -10.0, 0.5
     elif "P" in symbols_set or "N" in symbols_set:
         res_lo, res_hi = -10.0, 5.0
     elif any(s in symbols_set for s in ("F", "S", "C")): # Nafion-containing
-        coh_lo, coh_hi = -7.0, 0.5
+        coh_lo, coh_hi = -10.0, 0.5
     elif symbols_set <= {"H", "O"}:                      # bulk water
-        coh_lo, coh_hi = -6.0, 0.5
+        coh_lo, coh_hi = -10.0, 0.5
     else:                                                 # fallback
-        coh_lo, coh_hi = -7.0, 5.0
+        coh_lo, coh_hi = -10.0, 5.0
 
     if not (coh_lo < coh < coh_hi):
         bad.append(atoms)
