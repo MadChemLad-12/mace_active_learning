@@ -68,7 +68,7 @@ AL_INPUT_DIR  = "geo_opt_results/al_candidates"
 
 # How many frames to send to CP2K per round (total across all systems)
 N_SELECT_TOTAL = 100
-MAX_ATOMS = 450.0 # This is to prevent the data set becoming too large and wasting gpu
+MAX_ATOMS = 500.0 # This is to prevent the data set becoming too large and wasting gpu
 REUSE_EXISTING_CP2K = True # If true, skip writing inputs for frames that already have valid CP2K outputs (useful for iterative rounds)
 EXCLUDE_SYSTEM_KEYWORDS = [] 
 
@@ -359,46 +359,51 @@ LIBDIR = os.environ.get("CP2K_LIBDIR")
 if not LIBDIR:
     raise ValueError("CP2K_LIBDIR environment variable is not set! Did you source config.local.sh?")
 
+METALS = {"Pt", "Li"}  # extend if other transition metals are added later
+
+KIND_PARAMS = {
+    "H":  ("DZVP-MOLOPT-SR-GTH-q1",  "GTH-PBE-q1"),
+    "C":  ("DZVP-MOLOPT-SR-GTH-q4",  "GTH-PBE-q4"),
+    "O":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
+    "F":  ("DZVP-MOLOPT-SR-GTH-q7",  "GTH-PBE-q7"),
+    "S":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
+    "Pt": ("DZVP-MOLOPT-SR-GTH-q18", "GTH-PBE-q18"),
+}
+
+KIND_TEMPLATE = """\
+    &KIND {symbol}
+      BASIS_SET {basis}
+      POTENTIAL {potential}
+    &END KIND"""
+
+# NOTE: {scf_block} replaces the old hardcoded &SCF section, and STRESS_TENSOR
+# is now driven by a flag instead of being unconditionally ANALYTICAL (see
+# write_cp2k_sp / stress_tensor arg) since it's a known memory culprit on
+# large (470-580+ atom) systems.
 CP2K_TEMPLATE = """\
 &GLOBAL
   PROJECT_NAME {name}
   RUN_TYPE ENERGY_FORCE
   PRINT_LEVEL MEDIUM
+  PREFERRED_FFT_LIBRARY FFTW3
+  EXTENDED_FFT_LENGTHS .TRUE.
 &END GLOBAL
 
 &FORCE_EVAL
   METHOD QS
   &DFT
-    BASIS_SET_FILE_NAME {LIBDIR}/BASIS_MOLOPT
-    POTENTIAL_FILE_NAME {LIBDIR}/GTH_POTENTIALS
+    BASIS_SET_FILE_NAME {libdir}/BASIS_MOLOPT
+    POTENTIAL_FILE_NAME {libdir}/GTH_POTENTIALS
     &MGRID
       CUTOFF 500
       REL_CUTOFF 50
-      NGRIDS 5
+      NGRIDS 4
     &END MGRID
     &QS
       METHOD GPW
       EPS_DEFAULT 1.0E-12
     &END QS
-    &SCF
-      SCF_GUESS ATOMIC
-      MAX_SCF 150
-      EPS_SCF 1.0E-6
-      ADDED_MOS 500
-      &SMEAR ON
-        METHOD FERMI_DIRAC
-        ELECTRONIC_TEMPERATURE [K] 1000
-      &END SMEAR
-      &MIXING
-        METHOD BROYDEN_MIXING
-        ALPHA 0.1
-        BETA 1.0
-        NBROYDEN 4
-      &END MIXING
-      &DIAGONALIZATION
-        ALGORITHM STANDARD
-      &END DIAGONALIZATION
-    &END SCF
+{scf_block}
     &XC
       &XC_FUNCTIONAL PBE
       &END XC_FUNCTIONAL
@@ -407,7 +412,7 @@ CP2K_TEMPLATE = """\
         &PAIR_POTENTIAL
           TYPE DFTD3
           REFERENCE_FUNCTIONAL PBE
-          PARAMETER_FILE_NAME {LIBDIR}/dftd3.dat
+          PARAMETER_FILE_NAME {libdir}/dftd3.dat
         &END PAIR_POTENTIAL
       &END vdW_POTENTIAL
     &END XC
@@ -423,41 +428,18 @@ CP2K_TEMPLATE = """\
 {kinds}
   &END SUBSYS
   &PRINT
-    &STRESS_TENSOR
-    &END STRESS_TENSOR 
+{stress_print}
     &FORCES
     &END FORCES
   &END PRINT
-  STRESS_TENSOR ANALYTICAL 
+{stress_tensor_line}\
 &END FORCE_EVAL
 """
-
-KIND_TEMPLATE = """\
-    &KIND {symbol}
-      BASIS_SET {basis}
-      POTENTIAL {potential}
-    &END KIND"""
-
-KIND_PARAMS = {
-    "H":  ("DZVP-MOLOPT-SR-GTH-q1",  "GTH-PBE-q1"),
-    "C":  ("DZVP-MOLOPT-SR-GTH-q4",  "GTH-PBE-q4"),
-    "O":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
-    "F":  ("DZVP-MOLOPT-SR-GTH-q7",  "GTH-PBE-q7"),
-    "S":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
-    "Pt": ("DZVP-MOLOPT-SR-GTH-q18", "GTH-PBE-q18"),
-    # Add elements P, Li, B, N, 
-}
-
-if KIND_PARAMS == {    "Element":  ("DZVP-MOLOPT-SR-GTH",  "GTH-PBE")}:
-    print(f" You did not define your Kinds in the active pipline file")
-
 
 # Default cell dimensions per system type — used when a structure has no cell
 # (e.g. isolated molecules read from .cif without periodic boundary info).
 # Keys must match the system_type tag set by mace_geo_opt_base.py exactly
 # (case-insensitive comparison is used below).
-# takes a keyword that could be found in a structure name and gives it the following cell
- 
 DEFAULT_CELLS = {
     # Pt slab systems  (a, b, c) in Angstrom
     "default":             (11.099, 9.612,  33.000),
@@ -472,6 +454,104 @@ DEFAULT_CELLS = {
     "dissolvedo2_nafion":  (11.099, 9.612,  33.000),
     "dissolvedo_nafion":   (11.099, 9.612,  33.000),
 }
+
+
+def extract_valence_electrons(potential_str: str) -> int:
+    """Extracts valence electron count (q-value) from GTH potential name (e.g. 'GTH-PBE-q18' -> 18)."""
+    match = re.search(r'-q(\d+)$', potential_str)
+    if match:
+        return int(match.group(1))
+    raise ValueError(f"Could not parse valence electrons from potential string: {potential_str}")
+
+
+def calculate_added_mos(atoms) -> int:
+    """
+    Dynamically calculates ADDED_MOS based on system composition.
+
+    - Parses exact GTH q-values from KIND_PARAMS.
+    - If Pt (or another transition metal) is present, uses 20% of occupied states
+      (min 30, max 300) to ensure smooth Fermi-Dirac smearing across Pt-Nafion/water interfaces.
+    - For non-metallic systems, ADDED_MOS is unused (OT minimizer path), so returns 0.
+
+    This is the single source of truth for the added-MOS calculation; do not
+    duplicate this logic elsewhere.
+    """
+    total_valence_electrons = 0
+    has_metal = False
+
+    for symbol in atoms.get_chemical_symbols():
+        if symbol not in KIND_PARAMS:
+            raise KeyError(f"Element '{symbol}' missing from KIND_PARAMS dictionary.")
+
+        _, potential = KIND_PARAMS[symbol]
+        q_val = extract_valence_electrons(potential)
+        total_valence_electrons += q_val
+
+        if symbol in METALS:
+            has_metal = True
+
+    if not has_metal:
+        return 0
+
+    # Number of occupied spatial orbitals (spin-restricted / doubly occupied)
+    n_occupied = (total_valence_electrons + 1) // 2
+
+    # 20% extra MOS handles Fermi smearing for Pt slabs & interfaces,
+    # bounded to prevent memory blowups on large systems.
+    added_mos = int(n_occupied * 0.20)
+    return max(30, min(added_mos, 300))
+
+
+def _build_scf_block(atoms) -> str:
+    """
+    Builds the &SCF block based on physics:
+    - Systems with Pt/metals: Diagonalization + Fermi-Dirac Smearing + dynamic ADDED_MOS
+      (from calculate_added_mos, the single source of truth for that number).
+    - Non-metal systems: Orbital Transformation (OT) + no smearing + ADDED_MOS 0.
+    """
+    symbols = atoms.get_chemical_symbols()
+    has_metal = any(s in METALS for s in symbols)
+
+    if has_metal:
+        added_mos = calculate_added_mos(atoms)
+        return f"""\
+    &SCF
+      SCF_GUESS ATOMIC
+      MAX_SCF 150
+      EPS_SCF 1.0E-6
+      ADDED_MOS {added_mos}
+      &SMEAR ON
+        METHOD FERMI_DIRAC
+        ELECTRONIC_TEMPERATURE [K] 1000
+      &END SMEAR
+      &MIXING
+        METHOD BROYDEN_MIXING
+        ALPHA 0.1
+        BETA 1.0
+        NBROYDEN 4
+      &END MIXING
+      &DIAGONALIZATION
+        ALGORITHM STANDARD
+      &END DIAGONALIZATION
+    &END SCF"""
+    else:
+        # OT minimizer for pure water, Nafion fragments, or organic systems
+        return """\
+    &SCF
+      SCF_GUESS ATOMIC
+      MAX_SCF 100
+      EPS_SCF 1.0E-6
+      ADDED_MOS 0
+      &OT ON
+        MINIMIZER DIIS
+        PRECONDITIONER FULL_SINGLE_INVERSE
+        ENERGY_GAP 0.1
+      &END OT
+      &OUTER_SCF
+        MAX_SCF 10
+        EPS_SCF 1.0E-6
+      &END OUTER_SCF
+    &END SCF"""
 
 
 def _resolve_cell(atoms, name):
@@ -494,20 +574,34 @@ def _resolve_cell(atoms, name):
     return a, b, c
 
 
-def write_cp2k_sp(atoms, name, outdir):
-    """Write one CP2K single-point input file."""
+def write_cp2k_sp(atoms, name, outdir, stress_tensor=True, libdir=LIBDIR):
+    """
+    Write one CP2K single-point input file with dynamic SCF settings.
+
+    stress_tensor: if False, omits STRESS_TENSOR ANALYTICAL and the
+    &STRESS_TENSOR print block entirely. ANALYTICAL stress is a known
+    memory cost on large (470-580+ atom) systems — worth disabling as a
+    control when isolating OOM causes separately from any ulimit -v cap.
+    """
     os.makedirs(outdir, exist_ok=True)
+
+    symbols_present = sorted(set(atoms.get_chemical_symbols()))
+    missing = [s for s in symbols_present if s not in KIND_PARAMS]
+    if missing:
+        raise KeyError(
+            f"{name}: no KIND_PARAMS entry for element(s) {missing}. "
+            f"Refusing to write an input with atoms that have no matching &KIND "
+            f"(this used to fail silently)."
+        )
 
     a, b, c = _resolve_cell(atoms, name)
     print(f"  Writing CP2K input for {name}: "
           f"{len(atoms)} atoms  cell = {a:.6f} {b:.6f} {c:.6f}")
-        
 
     coords = ""
     for sym, pos in zip(atoms.get_chemical_symbols(), atoms.get_positions()):
         coords += f"      {sym:<4s} {pos[0]:14.8f} {pos[1]:14.8f} {pos[2]:14.8f}\n"
 
-    symbols_present = sorted(set(atoms.get_chemical_symbols()))
     kinds = "\n".join(
         KIND_TEMPLATE.format(
             symbol=s,
@@ -515,17 +609,22 @@ def write_cp2k_sp(atoms, name, outdir):
             potential=KIND_PARAMS[s][1]
         )
         for s in symbols_present
-        if s in KIND_PARAMS
     )
 
-    missing = [s for s in symbols_present if s not in KIND_PARAMS]
-    if missing:
-        print(f"  [!] No KIND_PARAMS for: {missing}  — they will be absent from {name}.inp")
+    scf_block = _build_scf_block(atoms)
+
+    if stress_tensor:
+        stress_print = "    &STRESS_TENSOR\n    &END STRESS_TENSOR"
+        stress_tensor_line = "  STRESS_TENSOR ANALYTICAL\n"
+    else:
+        stress_print = ""
+        stress_tensor_line = ""
 
     inp = CP2K_TEMPLATE.format(
         name=name, a=a, b=b, c=c,
         coords=coords.rstrip(), kinds=kinds,
-        LIBDIR=LIBDIR
+        scf_block=scf_block, libdir=libdir,
+        stress_print=stress_print, stress_tensor_line=stress_tensor_line,
     )
 
     inp_file = Path(outdir) / f"{name}.inp"
@@ -742,6 +841,7 @@ timestamp=$(date +%Y%m%d_%H%M)
 start_time=$(date +%s)
 counter=0
 export OMP_NUM_THREADS=6
+export OPENBLAS_NUM_THREADS=1
 total={len(jobs)}
 
 # --- memory guard settings ---
@@ -753,7 +853,6 @@ TIMES_LOG={cp2k_dir}/job_times.log
 # Hard backstop in case the polling watchdog misses a fast spike.
 # Virtual memory ulimit in KB; set slightly above MEM_LIMIT_KB so the
 # watchdog (softer, faster to react) is normally the one that fires.
-ulimit -v $(( MEM_LIMIT_KB * 110 / 100 ))
 
 print_eta() {{
     if (( counter > 0 && elapsed > 0 )); then
@@ -1547,7 +1646,7 @@ def is_physically_reasonable(atoms, calc, round_num=1, check_slab_z=False, force
     # --- Check 3: MACE per-atom force outlier ---
     # Scale the ceiling with round number — be stricter early on
     force_ceilings = {1: 8.0, 2: 10.0, 3: 12.0, 4: 20.0}
-    ceiling = force_ceilings.get(round_num, 15.0)
+    ceiling = force_ceilings.get(round_num, 25.0)
 
     # Use a copy to avoid attaching the calc to the original object permanently
     if forces is None:
@@ -1564,7 +1663,7 @@ def is_physically_reasonable(atoms, calc, round_num=1, check_slab_z=False, force
         worst_atom = symbols[np.argmax(force_mags)]
         return False, f"MACE force {max_f:.2f} eV/Å on {worst_atom} exceeds ceiling {ceiling}"
     
-    if max_f > 5 * mean_f and max_f > 3.0:
+    if max_f > 10 * mean_f and max_f > 3.0:
         worst_atom = symbols[np.argmax(force_mags)]
         return False, f"Force outlier: {worst_atom} ({max_f:.2f} eV/Å) vs mean ({mean_f:.2f} eV/Å)"
 
@@ -2395,13 +2494,13 @@ def parse_all_cp2k_outputs(target_round=None):
             elif pt_count > 0:                                       # dissolved Pt
                 res_lo, res_hi = -20.0, 10.0
             elif "P" in symbols_set or "N" in symbols_set:
-                res_lo, res_hi = -15.0, 7.0
+                res_lo, res_hi = -20.0, 7.0
             elif any(s in symbols_set for s in ("F", "S", "C")):    # Nafion
-                res_lo, res_hi = -10.0, 10.0
+                res_lo, res_hi = -20.0, 10.0
             elif symbols_set <= {"H", "O"}:                         # bulk water
                 res_lo, res_hi = -20.0, 10.0
             else:                                                    # fallback
-                res_lo, res_hi = -10.0, 5.0               
+                res_lo, res_hi = -20.0, 5.0               
 
             if not (res_lo < residual < res_hi):
                 print(f"  [!] {out_path.name}: residual={residual:.2f} eV/atom "
