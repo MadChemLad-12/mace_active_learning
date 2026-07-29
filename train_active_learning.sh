@@ -187,7 +187,7 @@ PARITY_SCRIPT="plot_parity.py"
 # =============================================================================
 
 timestamp=$(date +%Y%m%d_%H%M)
-MODEL_NAME="mace_V${ROUND}_LES_active_learning"
+MODEL_NAME="mace_V${ROUND}_active_learning"
 SWA_MODEL="${MODEL_NAME}_stagetwo.model"
 FINAL_MODEL="${MODEL_NAME}_final.model"
 TRAIN_LOG="train_V${ROUND}_${timestamp}.log"
@@ -240,8 +240,6 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "  Model name: $MODEL_NAME"
 echo "  Foundation: $FOUNDATION"
-echo "  Attempting MACELES"
-echo "  Attempting DryRun"
 section "Begin Training"
 
 mace_run_train \
@@ -256,7 +254,7 @@ mace_run_train \
     --stress_key="REF_stress" \
     --atomic_numbers="$ATOMIC_NUMBERS" \
     --E0s="$E0_VALUES" \
-    --model="MACELES" \
+    --model="MACE" \
     --forces_weight="$FORCES_WEIGHT" \
     --energy_weight="$ENERGY_WEIGHT" \
     --stress_weight="$STRESS_WEIGHT" \

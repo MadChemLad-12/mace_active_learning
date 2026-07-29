@@ -5,6 +5,14 @@ big_gap() {
     echo -e "\n\n\n\n"
 }
 
+track_memory() {
+    while true; do
+        echo "$(date '+%Y-%m-%d %H:%M:%S') $(nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits)" >> gpu_memory.log
+        sleep 10
+    done
+}
+
+
 # Define the Function
 run_training_round() {
     # We only pass ROUND as an argument to keep it explicit
@@ -47,6 +55,7 @@ run_training_round() {
         "${PIPE_ARGS[@]}" \
         --runs "${RUNS}" \
         --model "${FOUNDATION}" \
+        --target "$ROUND"
         "$ROUND"   
         big_gap     
     fi
@@ -64,7 +73,10 @@ run_training_round() {
 
     # Step 4: parse DFT & Build Data
     echo "Parsing DFT results for round $ROUND..."
-    python ${MACE_PATH}src/active_pipeline.py --parse-all
+    python ${MACE_PATH}src/active_pipeline.py \
+    --parse-all \
+    --target "$ROUND" \
+    --model "$FOUNDATION"
     cp master_train_pool.xyz "master_train_pool_${ROUND}_backup.xyz"
 
     big_gap
@@ -76,23 +88,44 @@ run_training_round() {
     python ${MACE_PATH}analysis/compare_models.py --make-held-out
 
     big_gap
+    track_memory &
+    TRACK_PID=$!
+    if [ "$pre_flight" = "True" ]; then
+        echo "Running OOM pre-flight check..."
+        if python oom_preflight.py \
+            --pool "$TRAINING_PATH" \
+            --model "$FOUNDATION" \
+            --batch_size 2 --max_count 700; then
+            echo "Pre-flight passed! Proceeding to training."
+        else
+            echo "Pre-flight failed! Skipping active learning retraining." >&2
+            exit 1
+        fi
+    fi
+
     echo "Retraining MACE model..."
     bash "${MACE_PATH}train_active_learning.sh" \
     --round "$ROUND" \
     --foundation "$FOUNDATION" \
     --training "$TRAINING_PATH"
+    kill $TRACK_PID
 
     # Step 6: Compare
     if [ "$COMPARE_MODELS" = "True" ]; then
         echo comparing models and analyzing results...
-        python ${MACE_PATH}analysis/compare_models.py --outdir comparison_results_val --test fps_validate_frames_corrected.xyz --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
-        python ${MACE_PATH}analysis/compare_models.py --outdir comparison_results --test held_out.xyz --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
+        python ${MACE_PATH}analysis/compare_models.py \
+        --outdir comparison_results \
+        --test held_out.xyz \
+        --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
         big_gap
     fi  
 
 
     echo Checking the loss function and best performing instances
-    python ${MACE_PATH}analysis/plotloss.py --log pipeline_$ROUND.log --head Default --out comparison_results/
+    python ${MACE_PATH}analysis/plotloss.py \
+    --log pipeline_$ROUND.log \
+    --head Default \
+    --out comparison_results/
 
     local END_TIME=$(date +%s)
     local TIMETAKEN=$(( (END_TIME - START_TIME) / 60))
@@ -115,6 +148,8 @@ FOUNDATION="${MACE_FOUNDATION_MODEL}"
 
 CP2K_RUN="True"
 RUNS="50"
+
+pre_flight="True"
 COMPARE_MODELS="True"
 
 echo "Starting Round $R. Logging to pipeline_$R.log"

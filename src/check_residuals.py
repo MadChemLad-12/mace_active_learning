@@ -19,10 +19,10 @@ import json
 
 
 APPLY_D3 = True
-
 MAX_FORCE_REF = 40.0   # eV/Å
 MAX_RMSE      = 1000    # meV/Å
 NON_PT_THRESH = 5.3
+MAX_COUNT     = 400
 EXTERNAL_SYSTEM_TYPES = ("mptrj", "oc25", "reico")
 
 E0_JSON = "E0s.json"
@@ -129,6 +129,14 @@ for index, atoms in enumerate(unique_frames):
     positions    = atoms.get_positions()
     pt_count     = symbols_list.count("Pt")
     stype        = atoms.info.get("system_type", "unknown")
+    atom_number  = len(atoms)
+    
+    # ── 0. Check it does not exceed atom count max ───────────────────────────
+    if atom_number > MAX_COUNT:
+        bad.append(atoms)
+        bad_info.append(f"[too_many_atoms_in_structure] "
+                        f"system_count={atom_number}, MAX_COUNT={MAX_COUNT}")
+        continue
 
     # ── 1. Non-Pt z-coordinate check ─────────────────────────────────────────
     is_not_pt = (np.array(symbols_list) != "Pt")
