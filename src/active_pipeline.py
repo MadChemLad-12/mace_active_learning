@@ -53,6 +53,9 @@ from patches import apply_dftd3_cell_patch
 import glob
 from pathlib import Path
 apply_dftd3_cell_patch()
+import importlib
+from configs.constants import
+from configs.round_configs.schema
 
 # ============================================================
 # Configuration
@@ -151,7 +154,7 @@ Z_MAP = {"H": 1, "Li": 3, "C": 6, "O": 8, "F": 9, "P": 15, "S": 16, "Pt": 78}
 # ============================================================
 # MACE re-scoring helper
 # ============================================================
-def rescore_with_mace(frames, model_path, device="cuda", dtype="float32"):
+def rescore_with_mace(frames, model_path, config):
     """
     Attach a fresh MACE calculator to every frame and compute forces.
     Needed when frames were loaded from disk without a live calculator.
@@ -162,18 +165,19 @@ def rescore_with_mace(frames, model_path, device="cuda", dtype="float32"):
         print("[!] mace not importable — skipping re-score, using stored forces.")
         return frames
 
-    calc_mace = MACECalculator(model_paths=model_path, device=device, default_dtype=dtype)
-    if APPLY_D3:
-        print(f"[→] Re-scoring with MACE + D3 (device={device}, dtype={dtype})...")
+    calc_mace = MACECalculator(model_paths=model_path, device=config.device, default_dtype=config.dtype)
+    if config.apply_d3:
+        
+        print(f"[→] Re-scoring with MACE + D3 (device={config.device}, dtype={config.dtype})...")
         calc_DFT = TorchDFTD3Calculator(
-            device=device,
+            device=config.device,
             damping="bj",
             xc=cfg.get("dispersion_xc", "pbe"),
             cutoff=cfg.get("dispersion_cutoff", 40.0),
         )
         calc = SumCalculator([calc_mace, calc_DFT])
     else:
-        print(f"[→] Re-scoring with MACE only (device={device}, dtype={dtype})...")
+        print(f"[→] Re-scoring with MACE only (device={config.device}, dtype={config.dtype})...")
         calc = calc_mace
     for atoms in frames:
         atoms.calc = calc
@@ -934,7 +938,7 @@ trap cleanup INT TERM
             f.write(header)
         f.write("\n".join(job_blocks))
 
-def write_all_sp_inputs(selected_frames, cp2k_dir, ignore_names=None):
+def write_all_sp_inputs(selected_frames, cp2k_dir, cfg, ignore_names=None):
     """
     Write CP2K single-point input files and submission scripts.
 
@@ -967,13 +971,13 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, ignore_names=None):
     os.makedirs(cp2k_dir, exist_ok=True)
 
     if ignore_names is None:
-        ignore_names = IGNORE_FAILED_NAMES
+        ignore_names = cfg.reuse_existing_cp2k
 
     # Load existing hash index (may be empty on first run)
-    geom_index   = _load_geometry_index(cp2k_dir) if REUSE_EXISTING_CP2K else {}
+    geom_index   = _load_geometry_index(cp2k_dir) if cfg.reuse_existing_cp2k else {}
 
     pool_hashes = set()
-    if REUSE_EXISTING_CP2K and Path(POOL_FILE).exists():
+    if cfg.reuse_existing_cp2k and Path(POOL_FILE).exists():
         try:
             pool_frames = read(POOL_FILE, index=":")
             pool_hashes = {get_atoms_hash(a) for a in pool_frames}
@@ -1672,8 +1676,7 @@ def is_physically_reasonable(atoms, calc, round_num=1, check_slab_z=False, force
 # ============================================================
 # Pre-CP2K triage: capped relaxation for pathological initial forces
 # ============================================================
-def relax_pathological_frames(frames, calc, trigger_force=GEOOPT_TRIGGER_FORCE,
-                               max_steps=GEOOPT_MAX_STEPS, fmax_target=GEOOPT_FMAX_TARGET):
+def relax_pathological_frames(frames, calc, cfg):
     """
     For any frame whose initial MACE force magnitude exceeds `trigger_force`,
     run a short, CAPPED relaxation to remove pathological overlaps/clashes
@@ -1699,6 +1702,10 @@ def relax_pathological_frames(frames, calc, trigger_force=GEOOPT_TRIGGER_FORCE,
     n_triggered = 0
     n_improved  = 0
 
+    trigger_force = cfg.geoopt_trigger_force
+    max_steps     = cfg.geoopt_max_steps
+    fmax_target   = cfg.geoopt_fmax_target
+    
     for atoms in frames:
         atoms_copy = atoms.copy()
         atoms_copy.calc = calc
@@ -1992,8 +1999,7 @@ def run_round():
             # with a bigger step budget than the general triage gets since
             # they start further from anything reasonable.
             reico_frames = relax_pathological_frames(
-                reico_frames, calc, trigger_force=0.0,
-                max_steps=60, fmax_target=GEOOPT_FMAX_TARGET
+                reico_frames, calc, cfg=CONFIG
             )
 
             n_rejected = 0
@@ -2019,7 +2025,7 @@ def run_round():
     if GEOOPT_TRIGGER == True:
         print(f"\n[→] Pre-CP2K triage: checking for pathological initial forces "
             f"(trigger > {GEOOPT_TRIGGER_FORCE} eV/Å)...")
-        selected = relax_pathological_frames(selected, calc)
+        selected = relax_pathological_frames(selected, calc, cfg=CONFIG)
 
     e0_inputs = []  # ← fix for the UnboundLocalError
     if not os.path.exists(E0_JSON):
@@ -2696,6 +2702,11 @@ if __name__ == "__main__":
     ROUND = args.target if args.target is not None else 1    
     CP2K_DIR = f"cp2k_sp_round{ROUND}"
 
+    config_module = importlib.import_module(
+    f"configs.round_configs.round{args.round}_active_pipeline"
+    )
+    CONFIG: ActivePipelineConfig = config_module.CONFIG    
+    
     print(f"[→] Round {ROUND}  |  Model: {args.model}  |  CP2K dir: {CP2K_DIR}")
     print("Starting execution for round context...\n")
 
