@@ -139,7 +139,7 @@ IGNORE_FAILED_NAMES = set()
 # Populated in __main__ alongside IGNORE_FAILED_NAMES: the atom-count above
 # which future candidates are preemptively skipped as OOM-risk. None = no
 # atom-count filtering (only exact-name skipping is applied).
-MAX_ATOMS_THRESHOLD = 400
+MAX_ATOMS_THRESHOLD = MAX_ATOMS
 
 # E0s Json
 E0_JSON = "E0s.json"
@@ -2672,6 +2672,7 @@ if __name__ == "__main__":
         "submit_missing.sh during --recover")
     parser.add_argument("--reparse",   action="store_true")
     parser.add_argument("--e0",        action="store_true")
+    parser.add_argument("--elements", nargs="+", type=str, help="Space-separated list of element symbols (e.g. -e Pt O C F)")
     parser.add_argument("--parse-all", action="store_true", dest="parse_all")
     parser.add_argument("--target",    type=int, default=None, help="Target round number for --parse-all and --recover (optional)")
     parser.add_argument("--dissolve",  action="store_true")
@@ -2742,8 +2743,9 @@ if __name__ == "__main__":
         apply_round(args.round_num)
     else:
         apply_round(ROUND) # Fallback to default global variable
+    DEFAULT_ELEMENTS = ["H", "C", "O", "F", "S", "Pt"]
     if args.e0:
-        elements = ["H", "C", "O", "F", "S", "Pt"]
+        elements = args.elements if args.elements else DEFAULT_ELEMENTS        
         if args.parse:
             parse_e0_results(E0_DIR, elements)
         else:
