@@ -46,72 +46,25 @@ from ase.geometry import find_mic
 from ase.mep.neb import NEB
 from ase.mep import NEBTools
 from mace.calculators import MACECalculator
+from configs.neb_model_compare_config import CONFIG, MODELS, SPECIES_MOVERS
 
 # ==============================================================================
 # SETTINGS — EDIT THESE
 # ==============================================================================
-
-# ── Models ────────────────────────────────────────────────────────────────────
-MODELS = {
-    "foundational": {
-        "path":  os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model"),
-        "label": "MACE-MP-0b3",
-        "color": "#2196F3",
-    },
-    "finetuned": {
-        "path":  os.environ.get("MACE_FINETUNED_MODEL"),
-        "label": "Fine-tune",
-        "color": "#F44336",
-    },
-}
 PATH_CSV    = os.environ.get("MACE_NEB_CSV", "configs.csv")
 OUTPUT_ROOT = os.environ.get("MACE_NEB_OUTPUT", "neb_comparison")
 
-# ── Device ────────────────────────────────────────────────────────────────────
-DEVICE = "cuda"
-DTYPE  = "float32"
-
-# ── ENDPOINT PRE-RELAXATION OPTIONS ─────────────────────────────────────────
-RELAX_ENDPOINTS = True        # Set to True to optimize initial/final structures first
-ENDPOINT_FMAX = 0.05          # Maximum residual force tolerance (eV/Å)
-
 # ── Structure validation ───────────────────────────────────────────────────────
 # Maximum distance (Å) an atom must move to be counted as "dissolving"
-DISSOLVING_THRESHOLD = 2.0      # atoms beyond this are flagged as movers
+DISSOLVING_THRESHOLD = CONFIG.dissolving_threshold     # atoms beyond this are flagged as movers
 # Maximum distance an atom may move AND still be called "stationary"
-STATIONARY_THRESHOLD = 0.8      # atoms beyond this but not dissolving → warning
-# Whether to abort NEB if the validator finds the wrong number of movers
-ABORT_ON_VALIDATION_FAIL = False
-
-# ── NEB ───────────────────────────────────────────────────────────────────────
-N_IMAGES      = 10
-NEB_FMAX      = 0.05
-NEB_OPTIMIZER = "FIRE"
-NEB_MAX_STEPS = 500
-CLIMB         = False
-FIX_BY_HEIGHT = True
-FIX_HEIGHT_THRESHOLD = 2.7      # Å — fix atoms below this z-height
+STATIONARY_THRESHOLD = CONFIG.stationary_threshold     # atoms beyond this but not dissolving → warning
 
 # ── Pathology detection ───────────────────────────────────────────────────────
-PATHOLOGY_ENERGY_SPIKE  = 2.0   # eV — flag image if E jumps > this vs neighbour
-PATHOLOGY_FORCE_FMAX    = 5.0   # eV/Å — flag image if max force exceeds this
-PATHOLOGY_ATOM_DISP     = 3.0   # Å — flag image if any atom moved > this vs init
-PATHOLOGY_ENERGY_ABS    = 5.0   # eV above initial energy → absolute flag
-
-# ==============================================================================
-# SPECIES → EXPECTED MOVER COUNT
-#   Derived from chemical formula of the dissolving species.
-#   PtOH2 → Pt + O + H + H = 4 atoms dissolve? No — the SPECIES dissolves
-#   together, so PtOH2 = 1 Pt + 1 O + 2 H = 4 atoms total.
-#   Adjust these if your naming convention differs.
-# ==============================================================================
-SPECIES_MOVERS = {
-    "Pt":    1,    # only the Pt atom dissolves
-    "PtO":   2,    # Pt + O
-    "PtOH":  3,    # Pt + O + H
-    "PtO2":  3,    # Pt + O + O
-    "PtOH2": 5,    # Pt + O + O + H + H
-}
+PATHOLOGY_ENERGY_SPIKE  = CONFIG.pathology_energy_spike   # eV — flag image if E jumps > this vs neighbour
+PATHOLOGY_FORCE_FMAX    = CONFIG.pathology_force_fmax     # eV/Å — flag image if max force exceeds this
+PATHOLOGY_ATOM_DISP     = CONFIG.pathology_atom_disp      # Å — flag image if any atom moved > this vs init
+PATHOLOGY_ENERGY_ABS    = CONFIG.pathology_energy_abs     # eV above initial energy → absolute flag
 
 # ==============================================================================
 # HELPERS
@@ -130,9 +83,9 @@ def parse_species_from_name(name: str) -> str | None:
 
 def get_fixed_indices(atoms):
     """Indices of atoms to freeze based on Z-height threshold."""
-    if not FIX_BY_HEIGHT:
+    if not CONFIG.fix_by_height:
         return []
-    return [a.index for a in atoms if a.position[2] < FIX_HEIGHT_THRESHOLD]
+    return [a.index for a in atoms if a.position[2] < CONFIG.fix_height_threshold]
 
 
 def mic_displacements(atoms_init, atoms_final):
@@ -310,8 +263,8 @@ def load_models() -> dict:
         print(f"[→] Loading model '{cfg['label']}' from: {cfg['path']}")
         calcs[key] = MACECalculator(
             model_paths=cfg["path"],
-            device=DEVICE,
-            default_dtype=DTYPE,
+            device=CONFIG.device,
+            default_dtype=CONFIG.dtype,
         )
         print(f"[✓] Loaded: {cfg['label']}")
     return calcs
@@ -357,12 +310,11 @@ def run_neb_single_model(
 
     # ── Build image list ──────────────────────────────────────────────────────
     images = [init_atoms.copy()]
-    for _ in range(N_IMAGES):
+    for _ in range(CONFIG.n_images):
         images.append(init_atoms.copy())
     images.append(final_atoms.copy())
 
-    #neb = NEB(images, climb=CLIMB, allow_shared_calculator=True)
-    neb = NEB(images, climb=CLIMB, allow_shared_calculator=True)
+    neb = NEB(images, climb=CONFIG.climb, allow_shared_calculator=True)
     neb.interpolate(apply_constraint=False)
 
     fixed_indices = get_fixed_indices(init_atoms)
@@ -375,14 +327,14 @@ def run_neb_single_model(
     traj_path = os.path.join(output_dir, f"{name}_neb.traj")
     log_path  = os.path.join(output_dir, f"{name}_neb.log")
 
-    if NEB_OPTIMIZER == "FIRE":
+    if CONFIG.neb_optimizer == "FIRE":
         optimizer = FIRE(neb, trajectory=traj_path, logfile=log_path)
     else:
         optimizer = BFGS(neb, trajectory=traj_path, logfile=log_path)
 
     t0 = time.perf_counter()
     try:
-        converged = optimizer.run(fmax=NEB_FMAX, steps=NEB_MAX_STEPS)
+        converged = optimizer.run(fmax=CONFIG.neb_fmax, steps=CONFIG.neb_max_steps)
         result["converged"] = converged
         print(f"    [{'✓' if converged else '~'}] NEB {'converged' if converged else 'did not converge'} "
               f"in {time.perf_counter()-t0:.1f} s")
@@ -461,7 +413,7 @@ def run_neb_single_model(
 
     return result
 
-def run_all_nebs(configs: list, calcs: dict, validation_results: list, no_neb: bool = False) -> dict:
+def run_all_nebs(configs: list, calcs: dict, output_root: str, validation_results: list, no_neb: bool = False) -> dict:
     """
     Run NEB for every config × every model.
     If no_neb=True, only relaxes endpoints (if RELAX_ENDPOINTS is set) and skips NEB.
@@ -481,7 +433,7 @@ def run_all_nebs(configs: list, calcs: dict, validation_results: list, no_neb: b
         final_path = config["final"]
 
         vr = val_lookup.get(name, {})
-        if ABORT_ON_VALIDATION_FAIL and not vr.get("passed", True):
+        if CONFIG.abort_on_validation_fail and not vr.get("passed", True):
             print(f"\n  [!] Skipping NEB for {name}: failed validation.")
             continue
 
@@ -492,17 +444,17 @@ def run_all_nebs(configs: list, calcs: dict, validation_results: list, no_neb: b
         init_atoms  = read(init_path)
         final_atoms = read(final_path)
         
-        if RELAX_ENDPOINTS:
-            print(f"\n      [→] Pre-relaxing endpoints for {name} via MACE-V4...")
+        if CONFIG.relax_endpoints :
+            print(f"\n      [→] Pre-relaxing endpoints for {name} via MACE...")
             target_calc = calcs["finetuned"]  # Maps to your MACE-V4 model
             
             for label, atoms in [("Initial", init_atoms), ("Final", final_atoms)]:
                 atoms.calc = target_calc
                 traj_path  = os.path.join(OUTPUT_ROOT, f"{name}_{label}_relax.traj")
                 # Using FIRE or BFGS; logfile=None keeps your terminal clean
-                opt = FIRE(atoms, logfile=None, trajectory=traj_path)
+                opt = FIRE(atoms, logfile=None, traj_path = os.path.join(output_root, f"{name}_{label}_relax.traj"))
                 t_opt0 = time.perf_counter()
-                opt.run(fmax=0.05, steps=200) 
+                opt.run(fmax=CONFIG.endpoint_fmax, steps=200) 
                 
                 # Check maximum remaining force
                 f_max = np.sqrt((atoms.get_forces() ** 2).sum(axis=1)).max()
@@ -704,8 +656,8 @@ def plot_comparison(comparisons: list, neb_results: dict):
             if F:
                 ax.plot(range(len(F)), F, "s--", color=c, label=lbl,
                         linewidth=1.5, markersize=4, alpha=0.8)
-        ax.axhline(NEB_FMAX, color="gray", linestyle=":", linewidth=1,
-                   label=f"NEB F_max threshold ({NEB_FMAX} eV/Å)")
+        ax.axhline(CONFIG.neb_fmax, color="gray", linestyle=":", linewidth=1,
+                   label=f"NEB F_max threshold ({CONFIG.neb_fmax} eV/Å)")
         ax.set_xlabel("NEB image")
         ax.set_ylabel("Max force (eV/Å)")
         ax.set_title("Max force per image")
@@ -947,29 +899,8 @@ def plot_pathology_summary(all_pathologies: dict, neb_results: dict):
 # PART 5 — ACTIVE DFT NEB PATHWAY REFINEMENT (LOCAL POLISH)
 # ==============================================================================
 
-RUN_DFT_REFINEMENT = True  # Toggle off if you want to skip DFT completely
-DFT_COMMAND        = "mpiexec -n 6 vasp_std"  # Command template for running DFT NEB refinement (expects {input_dir} and {output_dir} placeholders)
-
-# Optimized for a quick, localized path relaxation
-DFT_PARAMS = {
-    'ibrion': 2,           # Conjugate Gradient relaxation for ionic updates
-    'isif':   2,           # Relax ions only; keep the cell dimensions fixed
-    'nsw':    30,          # Cheap limit: Max 30 ionic steps to "polish" the MACE path
-    'ediffg': -0.05,       # Target force convergence (eV/Å)
-    'prec':   'Accurate',
-    'nelm':   150,
-    'ediff':  1e-6,
-    'nbands': 500,         # Remember to update based on total electrons + 500 empty bands
-    'ismear': -1,          # Fermi-Dirac
-    'sigma':  0.1,
-    'imix':   4,           # Broyden mixing
-    'amix':   0.1,
-    'bmix':   1.0,
-    'gga':    'PE',         # PBE
-    'ivdw':   11,          # Grimme D3
-    'lcharg': False,
-    'lwave':  False,
-}
+DFT_COMMAND        = CONFIG.dft_command 
+DFT_PARAMS         = CONFIG.dft_parms
 
 def run_dft_path_refinement(name: str, mace_images: list, target_model_label: str) -> list:
     """
@@ -991,7 +922,7 @@ def run_dft_path_refinement(name: str, mace_images: list, target_model_label: st
         os.makedirs(image_dir, exist_ok=True)
         
         calc = Vasp(
-            command=DFT_COMMAND,
+            command=CONFIG.dft_command,
             directory=image_dir,
             **DFT_PARAMS
         )
@@ -999,7 +930,7 @@ def run_dft_path_refinement(name: str, mace_images: list, target_model_label: st
 
     # Re-instantiate the NEB string context for ASE using the DFT-linked images
     # We match your script's settings (climb=False, k=0.1)
-    dft_neb = NEB(refined_images, climb=False, k=0.1)
+    dft_neb = NEB(refined_images, climb=CONFIG.climb, k=0.1)
     
     traj_path = os.path.join(cfg_dft_root, f"{name}_dft_refined.traj")
     log_path  = os.path.join(cfg_dft_root, f"{name}_dft_refined.log")
@@ -1189,7 +1120,7 @@ def main():
     # ── Part 2: NEB simulations ───────────────────────────────────────────────
     neb_results = {}
     if not args.no_neb:
-        neb_results = run_all_nebs(configs, calcs, validation_results, no_neb=args.no_neb)
+        neb_results = run_all_nebs(configs, calcs, validation_results, output_root=args.output_dir, no_neb=args.no_neb)
     else:
         print("\n[!] --no-neb set: skipping NEB runs.\n")
 
@@ -1207,7 +1138,7 @@ def main():
     plot_pathology_summary(all_pathologies, neb_results)
 
     # ── Part 5: DFT refinement (optional) ─────────────────────────────────────
-    if RUN_DFT_REFINEMENT:
+    if CONFIG.run_dft_refine:
         try:
             print("\n" + "="*70)
             print("  PART 5 — ACTIVE DFT PATHWAY REFINEMENT")
