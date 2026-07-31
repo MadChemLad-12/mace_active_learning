@@ -13,19 +13,15 @@ from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 import json
-#Example Json {Atomic number: energy eV}
-#E0s = {1: -12.6294, 6: -146.3745, 8: -431.6014, 
-#       9: -656.5253, 16: -274.7039, 78: -3264.7049}
+### CONSTANTS
+from configs.round_configs.round6_check_residual import CONFIG, get_residual_bounds, get_force_bounds
+from configs.constants import EXTERNAL_SYSTEM_TYPES, E0_JSON
 
+MAX_FORCE_REF = CONFIG.max_force_ref   # eV/Å
+MAX_RMSE      = CONFIG.max_rmse    # meV/Å
+NON_PT_THRESH = CONFIG.non_pt_thresh
+MAX_COUNT     = CONFIG.max_count
 
-APPLY_D3 = True
-MAX_FORCE_REF = 40.0   # eV/Å
-MAX_RMSE      = 1000    # meV/Å
-NON_PT_THRESH = 5.3
-MAX_COUNT     = 400
-EXTERNAL_SYSTEM_TYPES = ("mptrj", "oc25", "reico")
-
-E0_JSON = "E0s.json"
 try:
     with open(E0_JSON, "r") as file:
         E0s_ref = {int(k): v for k, v in json.load(file).items()}
@@ -110,7 +106,7 @@ calc_mace = MACECalculator(
     device="cuda",
     default_dtype="float32"
 )
-if APPLY_D3:
+if CONFIG.apply_d3:
     print(f"[→] Including D3 in calculations (MACE + D3)")
     calc_DFT = TorchDFTD3Calculator(
                     device="cuda",
@@ -203,19 +199,7 @@ for index, atoms in enumerate(unique_frames):
     e_ref    = sum(E0s_ref[z] for z in atoms.numbers)
     coh      = (e_total - e_ref) / len(atoms)
 
-    if   "Pt" in symbols_set and pt_count > 3:          # Pt slab
-        coh_lo, coh_hi = -10.0, 0.5
-    elif "Pt" in symbols_set and pt_count <= 3:          # dissolved Pt
-        coh_lo, coh_hi = -10.0, 0.5
-    elif "P" in symbols_set or "N" in symbols_set:
-        res_lo, res_hi = -10.0, 5.0
-    elif any(s in symbols_set for s in ("F", "S", "C")): # Nafion-containing
-        coh_lo, coh_hi = -10.0, 0.5
-    elif symbols_set <= {"H", "O"}:                      # bulk water
-        coh_lo, coh_hi = -10.0, 0.5
-    else:                                                 # fallback
-        coh_lo, coh_hi = -10.0, 5.0
-
+    coh_lo, coh_hi = get_residual_bounds(symbols_set, pt_count)
     if not (coh_lo < coh < coh_hi):
         bad.append(atoms)
         bad_info.append(f"[cohesive_energy] {stype} index={index} "
@@ -243,17 +227,7 @@ for index, atoms in enumerate(unique_frames):
     rmse     = np.sqrt(np.mean((mace_f - ref_f)**2)) * 1000
     max_mace = np.max(np.linalg.norm(mace_f, axis=1))
 
-    if   "Pt" in symbols_set and pt_count > 3:           # Pt slab
-        rmse_thresh = 1000
-    elif "P" in symbols_set or "N" in symbols_set:
-        rmse_thresh = 1000
-    elif symbols_set <= {"H", "O"}:                      # bulk water
-        rmse_thresh = 600
-    elif any(s in symbols_set for s in ("F", "S")):      # Nafion
-        rmse_thresh = 1000
-    else:                                                 # dissolved Pt / fallback
-        rmse_thresh = MAX_RMSE
-
+    rmse_thresh = get_force_bounds(symbols_list, pt_count)
     if rmse > rmse_thresh:
         bad.append(atoms)
         bad_info.append(f"[high_rmse] {stype} index={index} "
