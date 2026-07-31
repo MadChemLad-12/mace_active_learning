@@ -49,15 +49,17 @@ from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
+from configs.constants import HELD_OUT, E0_JSON
+from configs.round_configs.round6_check_residual import CONFIG
 
 # ==============================================================================
 # Configuration
 # ==============================================================================
 
-DEFAULT_TEST_SET = "held_out.xyz"
+DEFAULT_TEST_SET = HELD_OUT
 DEFAULT_OUTPUT   = "comparison_results"
 MAX_FORCE_THRESHOLD = 50.0
-APPLY_D3 = True  # Whether to include D3 in all calculations (MACE + D3) for this round. If False, only MACE is used.
+APPLY_D3 = CONFIG.apply_d3 # Whether to include D3 in all calculations (MACE + D3) for this round. If False, only MACE is used.
 COLORS = ["#6c757d", "#2196F3", "#4CAF50", "#FF9800",
           "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
 
@@ -599,7 +601,7 @@ def main():
     import json
 
     # You can add your own below if you like I 
-    E0_JSON = "E0s.json"
+    # E0_JSON = "E0s.json"
     try: 
         with open(E0_JSON, "r") as file:
             E0s_ref = {int(k): v for k, v in json.load(file).items()}
