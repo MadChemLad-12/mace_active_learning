@@ -2,9 +2,11 @@ import torch
 from mace.calculators import MACECalculator
 from ase.io import read
 import numpy as np
+import os
+from configs.constants import CLEAN_TRAIN
 
-MODEL_PATH = "mace-mp-0b3-medium-float32.model"
-POOL_FILE  = "active_learning/training_bad.xyz"
+MODEL_PATH = os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model")
+POOL_FILE  = CLEAN_TRAIN
 
 # Load pool and sort by volume largest first
 pool = read(POOL_FILE, index=":")
