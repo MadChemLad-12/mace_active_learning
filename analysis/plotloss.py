@@ -17,6 +17,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+import numpy as np
 
 
 def parse_log(log_path: str, target_head: str = None) -> dict:
@@ -30,20 +31,26 @@ def parse_log(log_path: str, target_head: str = None) -> dict:
     epoch_line_pat = re.compile(
         r'Epoch\s+(\d+):\s+head:\s+([\w.-]+),\s+loss=([\d.]+),\s*RMSE_E_per_atom=\s*([\d.]+)\s*meV,\s*RMSE_F=\s*([\d.]+)'
     )
-    
-    initial_pat = re.compile(
-        r'Initial:.*?RMSE_E_per_atom=\s*([\d.]+)\s*meV.*?RMSE_F=\s*([\d.]+)\s*meV'
-    )
-    
-    lines = Path(log_path).read_text(errors='replace').split('\n')
-    full_text = '\n'.join(lines)
 
-    # Attempt to capture initial metrics globally if present
-    initial_e, initial_f = None, None
-    m_init = initial_pat.search(full_text)
-    if m_init:
-        initial_e = float(m_init.group(1))
-        initial_f = float(m_init.group(2))
+    # NOTE: captures the head name too — initial RMSE must be tracked
+    # per-head, not globally. A global "first Initial: line wins" approach
+    # silently assigns one head's initial error to every other head, which
+    # corrupts the "Force/Energy Error Reduction %" figures for all heads
+    # after the first one in the log.
+    initial_pat = re.compile(
+        r'Initial:\s+head:\s+([\w.-]+),.*?RMSE_E_per_atom=\s*([\d.]+)\s*meV.*?RMSE_F=\s*([\d.]+)\s*meV'
+    )
+
+    lines = Path(log_path).read_text(errors='replace').split('\n')
+
+    # Per-head initial metrics
+    initial_by_head = {}
+    for line in lines:
+        m_init = initial_pat.search(line)
+        if m_init:
+            h, e_val, f_val = m_init.group(1), float(m_init.group(2)), float(m_init.group(3))
+            if h not in initial_by_head:
+                initial_by_head[h] = (e_val, f_val)
 
     for line in lines:
         # Parse epoch data
@@ -61,6 +68,7 @@ def parse_log(log_path: str, target_head: str = None) -> dict:
 
             # Initialize tracking nested dictionary for new heads on the fly
             if head_val not in heads_data:
+                init_e, init_f = initial_by_head.get(head_val, (None, None))
                 heads_data[head_val] = {
                     'epochs':         [],
                     'loss':           [],
@@ -68,8 +76,8 @@ def parse_log(log_path: str, target_head: str = None) -> dict:
                     'rmse_e':         [],
                     'stage2_epoch':   None,
                     'best_epoch':     None,
-                    'initial_rmse_f': initial_f,
-                    'initial_rmse_e': initial_e,
+                    'initial_rmse_f': init_f,
+                    'initial_rmse_e': init_e,
                 }
             
             # Watch out for Stage 2 markers triggering explicitly inside individual heads
@@ -90,7 +98,116 @@ def parse_log(log_path: str, target_head: str = None) -> dict:
     return heads_data
 
 
-def print_summary_table(head_name: str, data: dict):
+def analyze_trends(head_name: str, data: dict, window_frac: float = 0.5) -> dict:
+    """
+    Fit a simple linear trend (slope via least squares) to RMSE_E and RMSE_F
+    over the most recent `window_frac` fraction of epochs, to distinguish
+    "still noisily improving" from "steadily degrading" — the pattern that
+    matters most for deciding what to change before the next active
+    learning round (e.g. pt_head degrading while Default improves signals
+    a replay-size or loss-weight problem, not a training bug).
+
+    Returns a dict with slopes (units/epoch), direction labels, and the
+    fraction of epoch-to-epoch steps that got worse (noise indicator).
+    """
+    epochs = data['epochs']
+    n = len(epochs)
+    if n < 6:
+        return {'insufficient_data': True}
+
+    window_start = int(n * (1 - window_frac))
+    ep_window = np.array(epochs[window_start:])
+    e_window = np.array(data['rmse_e'][window_start:])
+    f_window = np.array(data['rmse_f'][window_start:])
+
+    def slope(x, y):
+        # least-squares linear fit: y = m*x + c, return m
+        A = np.vstack([x, np.ones_like(x)]).T
+        m, _ = np.linalg.lstsq(A, y, rcond=None)[0]
+        return m
+
+    def worsening_fraction(y):
+        diffs = np.diff(y)
+        return float(np.mean(diffs > 0)) if len(diffs) else 0.0
+
+    e_slope = slope(ep_window, e_window)
+    f_slope = slope(ep_window, f_window)
+
+    return {
+        'insufficient_data': False,
+        'window_epochs': (int(ep_window[0]), int(ep_window[-1])),
+        'e_slope_per_epoch': e_slope,
+        'f_slope_per_epoch': f_slope,
+        'e_direction': 'DEGRADING' if e_slope > 0 else 'improving',
+        'f_direction': 'DEGRADING' if f_slope > 0 else 'improving',
+        'e_worsening_fraction': worsening_fraction(e_window),
+        'f_worsening_fraction': worsening_fraction(f_window),
+        'e_total_change': float(e_window[-1] - e_window[0]),
+        'f_total_change': float(f_window[-1] - f_window[0]),
+    }
+
+
+def compare_heads_and_recommend(all_heads_data: dict, all_trends: dict) -> list:
+    """
+    Cross-head comparison producing concrete, actionable suggestions for
+    the NEXT active learning round — not just per-head benchmark status.
+    Looks specifically for the divergent-heads pattern (one head steadily
+    degrading while another improves), which is the earliest signal of
+    replay/forgetting issues in multihead fine-tuning, well before it
+    becomes a catastrophic Stage 1/SWA-destroying problem.
+    """
+    recs = []
+    degrading_heads = []
+    improving_heads = []
+
+    for head, trend in all_trends.items():
+        if trend.get('insufficient_data'):
+            continue
+        is_degrading = (
+            trend['e_direction'] == 'DEGRADING' and trend['e_worsening_fraction'] > 0.55
+        ) or (
+            trend['f_direction'] == 'DEGRADING' and trend['f_worsening_fraction'] > 0.55
+        )
+        (degrading_heads if is_degrading else improving_heads).append(head)
+
+    if degrading_heads and improving_heads:
+        recs.append(
+            f"[DIVERGENCE] Head(s) {degrading_heads} degrading while "
+            f"{improving_heads} improve. This is the classic replay/forgetting "
+            f"signature seen in earlier rounds (Stage 1/SWA E0 inconsistency). "
+            f"Before next round: consider increasing --num_samples_pt, raising "
+            f"the degrading head's relative loss weight, or checking whether "
+            f"the SWA phase (--start_swa) reverses this trend before assuming "
+            f"it's a real problem."
+        )
+
+    for head in degrading_heads:
+        t = all_trends[head]
+        recs.append(
+            f"[{head}] Energy RMSE trending {t['e_direction']} "
+            f"({t['e_slope_per_epoch']:+.3f} meV/epoch over epochs "
+            f"{t['window_epochs'][0]}-{t['window_epochs'][1]}, "
+            f"worsened in {t['e_worsening_fraction']*100:.0f}% of steps). "
+            f"If this continues past --start_swa, treat as an early forgetting "
+            f"signal rather than normal noise."
+        )
+
+    for head, trend in all_trends.items():
+        if trend.get('insufficient_data'):
+            continue
+        if trend['f_direction'] == 'improving' and trend['f_worsening_fraction'] < 0.3:
+            recs.append(
+                f"[{head}] Force RMSE improving cleanly "
+                f"({trend['f_slope_per_epoch']:+.3f} meV/Å/epoch) — no action needed."
+            )
+
+    if not recs:
+        recs.append("No strong divergence or degradation trend detected in the analyzed window.")
+
+    return recs
+
+
+def print_summary_table(head_name: str, data: dict, trend: dict = None):
     """Prints a structured performance report with scientific accuracy benchmarks."""
     epochs = data['epochs']
     best_ep = data['best_epoch']
@@ -112,6 +229,26 @@ def print_summary_table(head_name: str, data: dict):
         f_impr = (data['initial_rmse_f'] - min_f) / data['initial_rmse_f'] * 100
         print(f"  Force Error Reduction:   {f_impr:.1f}% ({data['initial_rmse_f']:.1f} -> {min_f:.1f} meV/Å)")
     print("─"*65)
+
+    # Recent-window trend (distinguishes noisy-but-improving from steadily
+    # degrading — the latter is the early forgetting/replay-imbalance signal)
+    if trend and not trend.get('insufficient_data'):
+        print(" RECENT TREND (most recent window):")
+        print("─"*65)
+        ep_lo, ep_hi = trend['window_epochs']
+        print(f"  • Window: epochs {ep_lo}-{ep_hi}")
+        print(f"  • Energy RMSE:  {trend['e_direction']:<10s} "
+              f"({trend['e_slope_per_epoch']:+.3f} meV/epoch, "
+              f"net {trend['e_total_change']:+.2f} meV, "
+              f"worsened {trend['e_worsening_fraction']*100:.0f}% of steps)")
+        print(f"  • Force RMSE:   {trend['f_direction']:<10s} "
+              f"({trend['f_slope_per_epoch']:+.3f} meV/Å/epoch, "
+              f"net {trend['f_total_change']:+.2f} meV/Å, "
+              f"worsened {trend['f_worsening_fraction']*100:.0f}% of steps)")
+        if trend['e_direction'] == 'DEGRADING' or trend['f_direction'] == 'DEGRADING':
+            print("  [!] Steady degradation detected in this window — see")
+            print("      cross-head recommendations at the end of output.")
+        print("─"*65)
     
     # Target Evaluation Framework
     print(" ACCURACY BENCHMARK ASSESSMENT:")
@@ -145,7 +282,6 @@ def make_figures(head_name: str, data: dict, out_dir: Path):
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        import numpy as np
     except ImportError:
         print("ERROR: matplotlib not installed. Run: pip install matplotlib")
         sys.exit(1)
@@ -280,11 +416,25 @@ def main():
         sys.exit(1)
 
     out_dir = Path(args.out)
+    all_trends = {}
     for head_name, data in all_heads_data.items():
         print(f"\nProcessing visual rendering for Head Layer -> [{head_name}] ({len(data['epochs'])} epochs found)")
         make_figures(head_name, data, out_dir)
-        print_summary_table(head_name, data)
-        
+        trend = analyze_trends(head_name, data)
+        all_trends[head_name] = trend
+        print_summary_table(head_name, data, trend)
+
+    # Cross-head comparison — only meaningful with 2+ heads (multihead
+    # fine-tuning runs), and this is where the actionable "what to change
+    # before next round" guidance lives.
+    if len(all_heads_data) > 1:
+        print("\n" + "═"*65)
+        print(" NEXT-ROUND RECOMMENDATIONS (cross-head analysis)")
+        print("═"*65)
+        for rec in compare_heads_and_recommend(all_heads_data, all_trends):
+            print(f"  • {rec}")
+        print("═"*65 + "\n")
+
     print("Execution complete.")
 
 
