@@ -2554,6 +2554,9 @@ if __name__ == "__main__":
         CONFIG.exclude_system_keywords.extend(args.exclude)
         print(f"[→] Excluding system keywords: {CONFIG.exclude_system_keywords}")
 
+    if args.target != CONFIG.round:
+        raise ValueError(f"Target round {args.target} does not match CONFIG.round {CONFIG.round}")
+    
     print(f"[→] Round {CONFIG.round}  |  Model: {args.model_path}  |  CP2K dir: {CONFIG.cp2k_dir}")
     print("Starting execution for round context...\n")
 
