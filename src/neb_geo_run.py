@@ -33,63 +33,47 @@ HOW TO USE:
 
 ==============================================================================
 """
-from copy import deepcopy
-import glob
-import os
-import json
-import csv
-import time
 import copy
+import csv
+import glob
+import json
+import os
+import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from copy import deepcopy
+
 import matplotlib.pyplot as plt
 import numpy as np
+from ase import units
+from ase.calculators.mixing import SumCalculator
+from ase.calculators.plumed import Plumed
+from ase.config import cfg
+from ase.constraints import FixAtoms
+from ase.geometry import find_mic
 from ase.io import read, write
 from ase.io.trajectory import Trajectory
-from ase.optimize import BFGS, FIRE
-from ase.constraints import FixAtoms
-from mace.calculators import MACECalculator
+from ase.md.langevin import Langevin
+from ase.md.velocitydistribution import (MaxwellBoltzmannDistribution,
+                                         Stationary)
 from ase.mep import SingleCalculatorNEB
 from ase.mep.neb import NEB
+from ase.optimize import BFGS, FIRE
+from mace.calculators import MACECalculator
 from scipy.optimize import linear_sum_assignment
-from ase.geometry import find_mic
 from scipy.spatial import cKDTree
-from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures import ThreadPoolExecutor
-import os
-from ase.config import cfg
-from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
+
 from patches import apply_dftd3_cell_patch
+from configs.constants import
+from configs.round_configs.schema import NebGeoRunConfig
 apply_dftd3_cell_patch()
 
 # ==============================================================================
 # SETTINGS — CHANGE THESE
 # ==============================================================================
 MACE_MODEL_PATH = os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model")
-DEVICE          = "cuda"                     # "cuda" or "cpu"
-DTYPE           = "float32"                  # Match your model's dtype
-NODES           = 6                          # For parallel processing (if used)
 OUTPUT_DIR      = "geo_opt_results"          # Where to save optimised structures
 PATH_CSV = os.environ.get("MACE_DEFAULT_CSV", "configs/configs.csv")
-
-# Geometry optimisation settings
-FMAX            = 0.05     # Force convergence threshold (eV/Å)
-MAX_STEPS       = 800      # Max optimisation steps per structure
-OPTIMIZER       = "FIRE"   # "BFGS" (smooth surfaces) or "FIRE" (robust, any surface)
-SKIP_OPTIMISATION = False   # Set to True to skip geometry optimisation
-APPLY_D3        = True     # Set to apply D3 correctional
-
-# Atom fixing
-FIX_BY_HEIGHT         = False
-FIX_HEIGHT_THRESHOLD  = 2.7    # Fix atoms below this Z (Angstrom)
-
-# NEB Settings
-SKIP_NEB      = False      # Set to True to skip NEB workflow
-N_IMAGES      = 10         # Number of intermediate frames
-NEB_FMAX      = 0.05       # Force threshold for the band
-NEB_OPTIMIZER = "FIRE"     # FIRE is generally more stable for NEB
-CLIMB         = False       # CI-NEB: finds the exact transition state
-MAX_WARNINGS   = 8          # Max allowed atoms moved > FIX_HEIGHT_THRESHOLD before flagging
-MAX_Threshold = 10.0         # Distance threshold (Å) for mapping consistency check
 
 # Cache Settings
 CACHE_FILE_NAME = "persistent_calc_cache.json"
@@ -128,43 +112,6 @@ PLUMED_CN_R0      = 0.27     # Switching-function radius for Pt-O CN (nm)
 PLUMED_CN_LOW     = 6.5      # Lower harmonic wall on CN (surface-like)
 PLUMED_CN_HIGH    = 9.5      # Upper harmonic wall on CN (bulk-metal-like)
 PLUMED_KAPPA      = 500.0    # Wall stiffness (kJ/mol)
-
-# ==============================================================================
-# AIMD settings
-# ==============================================================================
-# AIMD runs unbiased NVT molecular dynamics with MACE as the force engine.
-# Unlike PLUMED (which constrains the CV to stay near the surface state),
-# AIMD explores the full thermal energy surface freely.  This is useful for:
-#   - Sampling near-transition-state structures that NEB interpolation misses
-#   - Finding thermally-accessible configurations not reachable by geo-opt
-#   - Building a diverse pool of solvation-shell rearrangements
-#
-# WHEN TO USE:
-#   SKIP_AIMD = True   (default) — skip until round 3+ when the potential
-#                      is reliable enough not to produce garbage trajectories.
-#   SKIP_AIMD = False  — enable via --run-aimd flag.
-#                        Run on INITIAL structures only (same as PLUMED).
-#
-# AIMD vs PLUMED:
-#   PLUMED = biased, stays near surface state, cheap CV-guided sampling.
-#   AIMD   = unbiased, free thermal exploration, finds what PLUMED walls hide.
-#   Use both together from round 3+ for maximum diversity.
-#
-# TARGET SELECTION:
-#   AIMD_TARGET = "initial"  — sample near the adsorbed/surface state.
-#   AIMD_TARGET = "final"    — sample near the vacancy/dissolved state.
-#   AIMD_TARGET = "both"     — run AIMD on both endpoints per config.
-# ==============================================================================
-
-SKIP_AIMD        = True
-AIMD_STEPS       = 2000         # Total MD steps
-AIMD_TEMP        = 600          # Target temperature in K (higher → more diverse)
-AIMD_DT          = 1.0          # Timestep in fs (1.0 fs safe for most systems)
-AIMD_FRICTION    = 0.01         # Langevin friction coefficient (fs⁻¹)
-AIMD_STRIDE      = 20           # Save a frame every N steps
-AIMD_TARGET      = "initial"    # "initial", "final", or "both"
-AIMD_WARMUP      = 200          # Steps at low T before production (prevents explosion)
-AIMD_WARMUP_TEMP = 100          # Warmup temperature in K
 
 # Active learning export settings
 # The active_pipeline.py will look for these files.
@@ -244,7 +191,7 @@ def save_persistent_cache(cache_data):
     except Exception as e:
         print(f"[✗] Critical: Could not save persistent cache file: {e}")
 
-def check_mapping_consistency(atoms_ref, atoms_to_map, threshold=MAX_Threshold, max_warnings=MAX_WARNINGS):
+def check_mapping_consistency(atoms_ref, atoms_to_map, config: NebGeoRunConfig):
     """
     Checks if any atoms in the mapped structure are physically too far 
     from their reference positions.
@@ -266,21 +213,21 @@ def check_mapping_consistency(atoms_ref, atoms_to_map, threshold=MAX_Threshold, 
                 atoms_ref.positions[i] - same_element_pos,
                 cell, pbc
             )
-            if np.min(dists) > threshold:
+            if np.min(dists) > config.max_threshold:
                 problems.append((i, element, np.min(dists)))
 
         return problems
 
     # Threshold Logic: Only trigger detailed logs if we cross the warning limit
-    with ThreadPoolExecutor(max_workers=NODES) as executor:
+    with ThreadPoolExecutor(max_workers=config.nodes) as executor:
         futures = [executor.submit(check_element, el) for el in unique_elements]
         problematic_atoms = [p for f in futures for p in f.result()]
 
     warning_counter = len(problematic_atoms)
 
-    if warning_counter > max_warnings:
+    if warning_counter > config.max_warnings:
         print(f"\n[!] ALERT: Significant structural mismatch detected!")
-        print(f"    {warning_counter} atoms moved more than {threshold} Å.")
+        print(f"    {warning_counter} atoms moved more than {config.max_threshold} Å.")
         print(f"    This often indicates a Pt dissociation or a mapping error.")
         for idx, sym, d in problematic_atoms[:5]:
             print(f"    - Atom {idx} ({sym}): moved {d:.2f} Å")
@@ -290,7 +237,7 @@ def check_mapping_consistency(atoms_ref, atoms_to_map, threshold=MAX_Threshold, 
 
     return True
 
-def map_atoms_by_proximity(atoms_ref, atoms_to_map, cutoff=8.0):
+def map_atoms_by_proximity(atoms_ref, atoms_to_map, config: NebGeoRunConfig, cutoff=8.0):
     """
     Pairs atoms between two structures by minimizing the total 
     displacement (accounting for Periodic Boundary Conditions).
@@ -334,7 +281,7 @@ def map_atoms_by_proximity(atoms_ref, atoms_to_map, cutoff=8.0):
         return idx_ref[row_ind], idx_map[col_ind]
     
     # Run one thread per element — typically 3-5 elements (Pt, O, H, C, N...)
-    with ThreadPoolExecutor(max_workers=NODES) as executor:
+    with ThreadPoolExecutor(max_workers=config.nodes) as executor:
         futures = {element: executor.submit(solve_element, element)
                    for element in unique_elements}
 
@@ -344,18 +291,18 @@ def map_atoms_by_proximity(atoms_ref, atoms_to_map, cutoff=8.0):
 
     return atoms_to_map[new_indices]
 
-def load_mace():
+def load_mace(config: NebGeoRunConfig):
     """Load MACE model once — reused for all structures."""
     print(f"[→] Loading MACE model from: {MACE_MODEL_PATH}")
     calc_mace = MACECalculator(
         model_paths=MACE_MODEL_PATH,
-        device=DEVICE,
-        default_dtype=DTYPE
+        device=config.device,
+        default_dtype=config.dtype
     )
-    if APPLY_D3:
+    if config.apply_d3:
         print(f"[→] Including D3 in calculations (MACE + D3)")
         calc_DFT = TorchDFTD3Calculator(
-                    device="cuda",
+                    device=config.device,
                     damping="bj",
                     xc=cfg.get("dispersion_xc", "pbe"),
                     cutoff=cfg.get("dispersion_cutoff", 40.0),
@@ -367,36 +314,36 @@ def load_mace():
     return calc
 
 
-def get_fixed_indices(atoms):
+def get_fixed_indices(atoms, config: NebGeoRunConfig):
     """Return list of atom indices to freeze, based on Z-height threshold."""
     fixed = []
-    if FIX_BY_HEIGHT:
+    if config.fix_by_height:
         for atom in atoms:
-            if atom.position[2] < FIX_HEIGHT_THRESHOLD:
+            if atom.position[2] < config.fix_height_threshold:
                 fixed.append(atom.index)
     return fixed
 
 
-def optimise_structure(atoms, calc, label, config_name):
+def optimise_structure(atoms, calc, label, config_name, config: NebGeoRunConfig):
     """
     Run a geometry optimisation on a single structure.
     Returns: (optimised_atoms, energy, converged, steps_taken, max_force)
     """
     atoms.calc = calc
-    fixed_indices = get_fixed_indices(atoms)
+    fixed_indices = get_fixed_indices(atoms, config)
     if fixed_indices:
         atoms.set_constraint(FixAtoms(indices=fixed_indices))
 
     log_path  = os.path.join(OUTPUT_DIR, f"{config_name}_{label}.log")
     traj_path = os.path.join(OUTPUT_DIR, f"{config_name}_{label}_traj.traj")
 
-    if OPTIMIZER == "FIRE":
+    if config.optimizer == "FIRE":
         opt = FIRE(atoms, trajectory=traj_path, logfile=log_path)
     else:
         opt = BFGS(atoms, trajectory=traj_path, logfile=log_path)
 
     try:
-        converged   = opt.run(fmax=FMAX, steps=MAX_STEPS)
+        converged   = opt.run(fmax=config.fmax, steps=config.max_steps)
         steps_taken = opt.get_number_of_steps()
         energy      = atoms.get_potential_energy()
         forces      = atoms.get_forces()
@@ -415,12 +362,12 @@ def optimise_structure(atoms, calc, label, config_name):
         return atoms, None, False, 0, None
 
 
-def classify_stability(converged, max_force, steps_taken):
+def classify_stability(converged, max_force, steps_taken, config: NebGeoRunConfig):
     """Return a simple stability verdict string."""
-    if converged and max_force is not None and max_force < FMAX * 2:
+    if converged and max_force is not None and max_force < config.fmax * 2:
         return "STABLE ✓"
     elif max_force is not None and max_force < 0.5:
-        if steps_taken >= MAX_STEPS:
+        if steps_taken >= config.max_steps:
             return "NEARLY (~) [hit MAX_STEPS]"
         return "NEARLY (~)"
     else:
@@ -520,7 +467,7 @@ def get_energy_barrier(images, name):
         "reaction_energy":  E_reaction,
     }
 
-def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=False):
+def neb_workflow(init_atoms, final_atoms, calc, config: NebGeoRunConfig, name, use_proximity_mapping=False):
     """
     Run CI-NEB between init_atoms and final_atoms using MACE.
 
@@ -552,7 +499,7 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
         # --- Legacy / optional: reorder final by nearest-neighbour proximity ---
         print(f"  [→] Using proximity-based atom mapping...")
         try:
-            final_atoms = map_atoms_by_proximity(init_atoms, final_atoms)
+            final_atoms = map_atoms_by_proximity(init_atoms, final_atoms, config)
             print(f"  [✓] Proximity mapping successful."
                   f"  [!] Make sure to check the output of use_proximity_mapping")
         except Exception as e:
@@ -585,8 +532,8 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
 
     # ── 3. Consistency check (shared by both paths) ───────────────────────────
     if check_mapping_consistency(init_atoms, final_atoms):
-        print(f"  [✓] Structures consistent within {MAX_Threshold} Å "
-              f"({MAX_WARNINGS} warning threshold).")
+        print(f"  [✓] Structures consistent within {config.max_threshold} Å "
+              f"({config.max_warnings} warning threshold).")
     else:
         print(f"  [!] WARNING: Significant structural mismatch detected.")
         print(f"      NEB may fail or produce unphysical paths.")
@@ -594,15 +541,15 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
     
     # ── 4. Build image list ─────────────────────────────────────────────────── 
     images = [init_atoms.copy()]
-    for _ in range(N_IMAGES):
+    for _ in range(config.n_images):
         images.append(init_atoms.copy())  
     images.append(final_atoms.copy())
 
     # ── 5. Interpolate, then assign calculators and constrain ─────────────────────
-    neb = NEB(images, climb=CLIMB, allow_shared_calculator=False)
+    neb = NEB(images, climb=config.climb, allow_shared_calculator=False)
     neb.interpolate(apply_constraint=False)  # interpolate positions first
 
-    fixed_indices = get_fixed_indices(init_atoms)
+    fixed_indices = get_fixed_indices(init_atoms, config)
     if fixed_indices:
         for image in images:
             image.set_constraint(FixAtoms(indices=fixed_indices))
@@ -614,14 +561,14 @@ def neb_workflow(init_atoms, final_atoms, calc, name, use_proximity_mapping=Fals
     neb_traj_path = os.path.join(OUTPUT_DIR, f"{name}_neb.traj")
     neb_log_path  = os.path.join(OUTPUT_DIR, f"{name}_neb.log")
 
-    if NEB_OPTIMIZER == "FIRE":
+    if config.neb_optimizer == "FIRE":
         optimizer = FIRE(neb, trajectory=neb_traj_path, logfile=neb_log_path)
     else:
         optimizer = BFGS(neb, trajectory=neb_traj_path, logfile=neb_log_path)
 
     try:
         t0 = time.perf_counter()
-        optimizer.run(fmax=NEB_FMAX, steps=MAX_STEPS)
+        optimizer.run(fmax=config.neb_fmax, steps=config.max_steps)
         print(f"[✓] NEB completed for {name} in {time.perf_counter() - t0:.2f} s")
         get_energy_barrier(images, name)
         
@@ -688,10 +635,6 @@ def export_geoopt_for_al(name, init_atoms, final_atoms):
 # ==============================================================================
 # PLUMBED WORKFLOW  (find unique configurations + export for AL)
 # ==============================================================================
-from ase.calculators.plumed import Plumed
-from mace.calculators import MACECalculator
-from ase.md.langevin import Langevin
-from ase import units
 
 def find_surface_pt_index(atoms):
     """
@@ -787,9 +730,6 @@ def plumed_sampling(atoms, calc, name,
  
     Returns a list of ASE Atoms (the saved frames), or [] on failure.
     """
-    from ase.calculators.plumed import Plumed
-    from ase.md.langevin import Langevin
-    from ase import units
  
     if n_steps  is None: n_steps  = PLUMED_STEPS
     if timestep is None: timestep = PLUMED_DT
@@ -884,7 +824,7 @@ def plumed_sampling(atoms, calc, name,
 # AIMD WORKFLOW  (unbiased NVT thermal sampling with MACE)
 # ==============================================================================
 
-def aimd_sampling(atoms, calc, name, n_steps=None, timestep=None):
+def aimd_sampling(atoms, calc, name, config: NebGeoRunConfig, n_steps=None, timestep=None):
     """
     Run unbiased NVT Langevin MD with MACE to thermally sample the local
     energy surface around a given structure.
@@ -901,24 +841,21 @@ def aimd_sampling(atoms, calc, name, n_steps=None, timestep=None):
 
     Returns a list of ASE Atoms objects (the saved frames), or [] on failure.
     """
-    from ase.md.langevin import Langevin
-    from ase.md.velocitydistribution import MaxwellBoltzmannDistribution, Stationary
-    from ase import units
 
-    if n_steps  is None: n_steps  = AIMD_STEPS
-    if timestep is None: timestep = AIMD_DT
+    if n_steps  is None: n_steps  = config.aimd_steps
+    if timestep is None: timestep = config.aimd_dt
 
     total_time_ps = n_steps * timestep / 1000.0
-    n_frames      = n_steps // AIMD_STRIDE
+    n_frames      = n_steps // config.aimd_stride
     print(f"\n[→] Starting AIMD for: {name}")
     print(f"    {n_steps} steps × {timestep} fs = {total_time_ps:.2f} ps "
-          f"| T = {AIMD_TEMP} K | ~{n_frames} frames")
+          f"| T = {config.aimd_temp} K | ~{n_frames} frames")
 
     sampling_atoms = atoms.copy()
     sampling_atoms.calc = calc
 
     # Apply the same bottom-layer constraint as geo-opt and PLUMED
-    fixed_indices = get_fixed_indices(sampling_atoms)
+    fixed_indices = get_fixed_indices(sampling_atoms, config)
     if fixed_indices:
         sampling_atoms.set_constraint(FixAtoms(indices=fixed_indices))
 
@@ -927,39 +864,39 @@ def aimd_sampling(atoms, calc, name, n_steps=None, timestep=None):
     # structure relax its internal stress before the full temperature hits.
     # Without this, high-force starting geometries can blow up in the first
     # few steps and produce unphysical frames.
-    print(f"  [→] Warmup: {AIMD_WARMUP} steps at {AIMD_WARMUP_TEMP} K...")
+    print(f"  [→] Warmup: {config.aimd_warmup} steps at {config.aimd_warmup_temp} K...")
     MaxwellBoltzmannDistribution(sampling_atoms,
-                                  temperature_K=AIMD_WARMUP_TEMP,
+                                  temperature_K=config.aimd_warmup_temp,
                                   rng=np.random.default_rng(42))
     Stationary(sampling_atoms)  # zero net momentum
 
     warmup_dyn = Langevin(
         sampling_atoms,
         timestep=timestep * units.fs,
-        temperature_K=AIMD_WARMUP_TEMP,
-        friction=AIMD_FRICTION,
+        temperature_K=config.aimd_warmup_temp,
+        friction=config.aimd_friction,
     )
     try:
-        warmup_dyn.run(AIMD_WARMUP)
+        warmup_dyn.run(config.aimd_warmup)
         print(f"  [✓] Warmup complete.")
     except Exception as e:
         print(f"  [✗] Warmup failed for {name}: {e}")
         return []
 
     # ── Production phase ──────────────────────────────────────────────────────
-    print(f"  [→] Production: {n_steps} steps at {AIMD_TEMP} K...")
+    print(f"  [→] Production: {n_steps} steps at {config.aimd_temp} K...")
 
     # Re-initialise velocities at production temperature
     MaxwellBoltzmannDistribution(sampling_atoms,
-                                  temperature_K=AIMD_TEMP,
+                                  temperature_K=config.aimd_temp,
                                   rng=np.random.default_rng(123))
     Stationary(sampling_atoms)
 
     prod_dyn = Langevin(
         sampling_atoms,
         timestep=timestep * units.fs,
-        temperature_K=AIMD_TEMP,
-        friction=AIMD_FRICTION,
+        temperature_K=config.aimd_temp,
+        friction=config.aimd_friction,
     )
 
     sampled_frames = []
@@ -970,11 +907,11 @@ def aimd_sampling(atoms, calc, name, n_steps=None, timestep=None):
         at.info["system_type"]   = name
         at.info["source"]        = "mace_aimd"
         at.info["aimd_step"]     = prod_dyn.get_number_of_steps()
-        at.info["aimd_temp_K"]   = AIMD_TEMP
+        at.info["aimd_temp_K"]   = config.aimd_temp
         at.info["aimd_dt_fs"]    = timestep
         sampled_frames.append(at)
 
-    prod_dyn.attach(_save_frame, interval=AIMD_STRIDE)
+    prod_dyn.attach(_save_frame, interval=config.aimd_stride)
 
     try:
         t0 = time.perf_counter()
@@ -1014,6 +951,7 @@ def main():
     global MACE_MODEL_PATH
     
     import argparse
+    import importlib
     parser = argparse.ArgumentParser()
     parser.add_argument("--round",       type=int, default=1)
     parser.add_argument("--model",       type=str, default=None,
@@ -1033,45 +971,54 @@ def main():
                         help="Which endpoint(s) to run AIMD on (default: initial)")
     args = parser.parse_args()
     
-    if args.run_plumed:
-        SKIP_PLUMED = False
-
-    elif args.skip_plumed:
-        SKIP_PLUMED = True
-
-    else:
-        # Default behaviour based on round number
-        SKIP_PLUMED = (args.round <= 2)
+    # --- Load the round config -- single source of truth for ROUND from here on ---
+    config_module = importlib.import_module(
+        f"configs.round_configs.round{args.round}_neb_geo_run"
+    )
+    CONFIG: NebGeoRunConfig = config_module.CONFIG
     
-    if args.skip_neb:
-        SKIP_NEB = True
-    else:
-        SKIP_NEB = (args.round <= 1)
-
-    # AIMD: off by default, enabled from round 3+ or with --run-aimd
-    if args.run_aimd:
-        SKIP_AIMD = False
-    elif args.skip_aimd:
-        SKIP_AIMD = True
-    else:
-        SKIP_AIMD = (args.round <= 2)
-
-    if args.aimd_target is not None:
-        AIMD_TARGET = args.aimd_target
+    if args.round != CONFIG.round:
+        raise ValueError(
+            f"round{args.round}_neb_geo_run.py has CONFIG.round={CONFIG.round} but args says {args.round}"
+            f"internally -- these must match. Did you forget to update CONFIG.round "
+            f"after copying the file forward?"
+        )
     
-    if args.model:
-        MACE_MODEL_PATH = args.model
+    # --- CLI overrides, applied explicitly (only if the user actually passed them) ---
+    if args.model is not None:
+        MACE_MODEL_PATH = args.model  # see note below on model_path
         print(f"[✓] Model overridden by argument: {MACE_MODEL_PATH}")
+
+    if args.run_plumed:
+        CONFIG.skip_plumed = False
+    elif args.skip_plumed:
+        CONFIG.skip_plumed = True
+    else:
+        CONFIG.skip_plumed = CONFIG.round <= 99   # default: skip for rounds 1-2
+
+    if args.skip_neb:
+        CONFIG.skip_neb = True
+    else:
+        CONFIG.skip_neb = CONFIG.round <= 1
+
+    if args.run_aimd:
+        CONFIG.skip_aimd = False
+    elif args.skip_aimd:
+        CONFIG.skip_aimd = True
+    else:
+        CONFIG.skip_aimd = CONFIG.round <= 2
+
+    aimd_targets = args.aimd_target if args.aimd_target is not None else CONFIG.aimd_target
     
     make_output_dir()
     persistent_cache = load_persistent_cache()
     
-    calc  = load_mace()
+    calc  = load_mace(config=CONFIG)
     start = time.perf_counter()
 
     total_configs = len(CONFIGURATIONS)
     results = []
-    print(f"The simulation will run on {DEVICE.upper()} with MACE model: {os.path.basename(MACE_MODEL_PATH)}")
+    print(f"The simulation will run on {CONFIG.device.upper()} with MACE model: {os.path.basename(MACE_MODEL_PATH)}")
     print(f"Program started at {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f" Starting calculations for {total_configs} configurations...\n")
     print(f"{'Config':<20} {'Initial':<25} {'Final':<25}")
@@ -1145,7 +1092,7 @@ def main():
                   f"cell = {atoms.get_cell().lengths()} Å")
             atoms.calc = calc
 
-            if SKIP_OPTIMISATION:
+            if CONFIG.skip_optimisation:
                 print(f"  [→] Skipping optimisation for {label}. Calculating energy...")
                 e         = atoms.get_potential_energy()
                 conv, steps, fmax = True, 0, 0.0
@@ -1153,10 +1100,10 @@ def main():
                 opt_atoms = atoms
             else:
                 print(f"  [→] Optimising {label} structure...")
-                opt_atoms, e, conv, steps, fmax = optimise_structure(atoms, calc, label, name)
+                opt_atoms, e, conv, steps, fmax = optimise_structure(atoms, calc, label, name, config = CONFIG)
 
             if e is not None:
-                status = classify_stability(conv, fmax, steps)
+                status = classify_stability(conv, fmax, steps, config = CONFIG)
                 print(f"  [{'✓' if conv else '~'}] {label.capitalize()}: E = {e:.4f} eV | Steps = {steps} | {status}")
 
                 out_file = os.path.join(OUTPUT_DIR, f"{name}_{label}_opt.cif")
@@ -1188,20 +1135,20 @@ def main():
         # ── EXPORT GEO-OPT FOR AL ─────────────────────────────────────────────
         if "initial" in current_run_atoms and "final" in current_run_atoms:
             export_geoopt_for_al(name, current_run_atoms["initial"], current_run_atoms["final"])
-        elif SKIP_OPTIMISATION:
+        elif CONFIG.skip_optimisation:
             if os.path.exists(init_path) and os.path.exists(final_path):
                 export_geoopt_for_al(name, read(init_path), read(final_path))
 
         # ── NEB STEP ──────────────────────────────────────────────────────────
-        init_ok  = "STABLE" in config_result.get("initial_status", "") or SKIP_OPTIMISATION
-        final_ok = "STABLE" in config_result.get("final_status", "") or SKIP_OPTIMISATION
+        init_ok  = "STABLE" in config_result.get("initial_status", "") or CONFIG.skip_optimisation
+        final_ok = "STABLE" in config_result.get("final_status", "") or CONFIG.skip_optimisation
  
         init_for_neb  = current_run_atoms.get("initial")
         final_for_neb = current_run_atoms.get("final")
             
-        if not SKIP_NEB:
+        if not CONFIG.skip_neb:
             if init_for_neb is not None and final_for_neb is not None and init_ok and final_ok:
-                neb_workflow(init_for_neb, final_for_neb, calc, name)
+                neb_workflow(init_for_neb, final_for_neb, calc, name, config = CONFIG)
                 config_result["neb_run"] = True
             else:
                 print(f"  [!] Skipping NEB for {name}: endpoints not ready/stable.")
@@ -1211,7 +1158,7 @@ def main():
         # near the surface state, not the vacancy/dissolved state.
         # Skipped entirely if SKIP_PLUMED = True (recommended for rounds 1-2).
 
-        if not SKIP_PLUMED:
+        if not CONFIG.skip_plumed:
             if init_for_neb is not None:
                 print(f"  [→] Running PLUMED sampling for {name}...")
                 print(f"      Sampling local minimum around initial structure")
@@ -1221,18 +1168,18 @@ def main():
             else:
                 print(f"  [!] Skipping PLUMED for {name}: initial structure not available.")
         else:
-            print(f"  [→] Skipping PLUMED sampling for {name} (SKIP_PLUMED=True)")
+            print(f"  [→] Skipping PLUMED sampling for {name} (CONFIG.skip_plumed=True)")
             print(f"      Try in later rounds once the model is more reliable.")
             
         # --- AIMD unbiased thermal sampling ---
         # Runs free NVT Langevin MD with MACE — no CV bias, no walls.
         # Explores the thermal energy surface around the chosen endpoint(s).
         # AIMD_TARGET controls which endpoint(s) are sampled.
-        if not SKIP_AIMD:
+        if not CONFIG.skip_aimd:
             aimd_targets = []
-            if AIMD_TARGET in ("initial", "both") and init_for_neb is not None:
+            if CONFIG.aimd_target in ("initial", "both") and init_for_neb is not None:
                 aimd_targets.append(("initial", init_for_neb))
-            if AIMD_TARGET in ("final", "both") and final_for_neb is not None:
+            if CONFIG.aimd_target in ("final", "both") and final_for_neb is not None:
                 aimd_targets.append(("final", final_for_neb))
 
             if not aimd_targets:
@@ -1242,12 +1189,12 @@ def main():
                 for endpoint_label, endpoint_atoms in aimd_targets:
                     aimd_name = f"{name}_{endpoint_label}"
                     print(f"  [→] Running AIMD on {endpoint_label} structure of {name}...")
-                    aimd_frames = aimd_sampling(endpoint_atoms, calc, aimd_name)
+                    aimd_frames = aimd_sampling(endpoint_atoms, calc, aimd_name, config = CONFIG)
                     total_aimd_frames += len(aimd_frames)
                 config_result["aimd_run"]    = total_aimd_frames > 0
                 config_result["aimd_frames"] = total_aimd_frames
         else:
-            print(f"  [→] Skipping AIMD for {name} (SKIP_AIMD=True)")
+            print(f"  [→] Skipping AIMD for {name} (CONFIG.skip_aimd=True)")
             print(f"      Enable from round 3+ with --run-aimd.")
             config_result["aimd_run"]    = False
             config_result["aimd_frames"] = 0
@@ -1317,7 +1264,7 @@ def main():
         for name in needs_attention:
             print(f"    • {name}")
         print(f"\n    Tips for unstable structures:")
-        print(f"    - Increase MAX_STEPS (currently {MAX_STEPS})")
+        print(f"    - Increase MAX_STEPS (currently {CONFIG.max_steps})")
         print(f"    - Check structure visually in VESTA")
         print(f"    - Consider OPTIMIZER = 'FIRE' for difficult cases")
 

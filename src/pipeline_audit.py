@@ -38,14 +38,12 @@ from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
-
-# Import functions and configurations from your active learning pipeline ecosystem
-from MACE_CP2K_pipeline.src.active_pipeline  import (
-    APPLY_D3, write_cp2k_sp, POOL_FILE, CP2K_TIMEOUT,
-    parse_cell_from_out, parse_positions_from_out, 
+from configs.round_configs.schema import ActivePipelineConfig
+from src.active_pipeline import (
+    write_cp2k_sp, parse_cell_from_out, parse_positions_from_out,
     _write_submission_script, parse_stress_from_out
 )
-ROUND = 1
+
 HASH_PRECISION = 4
 def get_atoms_hash(atoms):
     """Generates a stable geometric MD5 hash matching your pipeline profile."""
@@ -82,7 +80,7 @@ def parse_energy_forces(out_content):
 
     return energy, forces
 
-def force_insert_cp2k_output(out_file_path, destination="master"):
+def force_insert_cp2k_output(out_file_path, config: ActivePipelineConfig, destination="master"):
     """
     Parses a completed CP2K .out file and directly injects it into either
     the master_train_pool.xyz or training_clean.xyz file, bypassing step checks.
@@ -163,7 +161,7 @@ def force_insert_cp2k_output(out_file_path, destination="master"):
     stem_match = re.search(r"sp_(.*?)_r\d+_", out_path.stem)
     system_tag = stem_match.group(1) if stem_match else "forced_insertion"
     atoms.info["system_type"] = system_tag
-    atoms.info["al_round"] = ROUND
+    atoms.info["al_round"] = config.round
     atoms.info["source"] = "cp2k_sp"
 
     # Check for exact duplicate geometry entries in target file before appending
@@ -183,13 +181,13 @@ def force_insert_cp2k_output(out_file_path, destination="master"):
     # Handle structural validation layer required specifically for training clean records
     if destination == "clean":
         print("  [→] Aligning MACE baseline residuals for training compatibility...")
-        from MACE_CP2K_pipeline.src.active_pipeline import MODEL_PATH
+        from src.active_pipeline import MODEL_PATH
         try:
-            calc_mace = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
-            if APPLY_D3:
+            calc_mace = MACECalculator(model_paths=MODEL_PATH, device=config.device, default_dtype=config.dtype)
+            if config.apply_d3:
                 print(f"[→] Including D3 in calculations (MACE + D3)")
                 calc_DFT = TorchDFTD3Calculator(
-                    device="cuda",
+                    device=config.device,
                     damping="bj",
                     xc=cfg.get("dispersion_xc", "pbe"),
                     cutoff=cfg.get("dispersion_cutoff", 40.0),
@@ -213,7 +211,7 @@ def force_insert_cp2k_output(out_file_path, destination="master"):
         print(f"  [✗] Failed to write structural frame update onto disk: {e}")
 
 
-def track_and_recover_structures(file_path, force_cp2k=False, n_fps_frames=3):
+def track_and_recover_structures(file_path, config: ActivePipelineConfig,force_cp2k=False, n_fps_frames=3):
     """Audits structural files through active learning stages (unchanged functionality)."""
     path = Path(file_path)
     if not path.exists():
@@ -307,9 +305,9 @@ def track_and_recover_structures(file_path, force_cp2k=False, n_fps_frames=3):
             print(f"      {'[✓]' if passed else '[✗]'} {stage}")
 
         if force_cp2k and not stages["2. CP2K Configuration Built (.inp)"]:
-            cp2k_dir = f"cp2k_sp_round{ROUND}"
+            cp2k_dir = f"cp2k_sp_round{config.round}"
             os.makedirs(cp2k_dir, exist_ok=True)
-            job_name = f"sp_FORCED_{target_stem}_r{ROUND}"
+            job_name = f"sp_FORCED_{target_stem}_r{config.round}"
             atoms_target.info["system_type"] = f"FORCED_{target_stem}"
             
             inp_path = write_cp2k_sp(atoms_target, job_name, cp2k_dir)
@@ -345,34 +343,34 @@ def resolve_out_files(path_list):
         return expanded
 
 if __name__ == "__main__":
+    import importlib
+    from configs.round_configs.schema import ActivePipelineConfig
+
     parser = argparse.ArgumentParser(description="Multi-file/NEB path pipeline tracking script.")
-    
-    # Core Audit Parameters
     parser.add_argument("--audit", nargs="+", help="List of files to track through active learning pipeline stages.")
     parser.add_argument("--force-cp2k", action="store_true", help="Force generate CP2K inputs for frames that were skipped.")
     parser.add_argument("--n-fps", type=int, default=3, help="Number of distinct images to pull using FPS mapping.")
-    
-    # NEW: Direct Entry Overrides
     parser.add_argument("--add-master", nargs="+", default=[], help="List of completed CP2K .out paths to parse directly into master_train_pool.xyz")
     parser.add_argument("--add-clean", nargs="+", default=[], help="List of completed CP2K .out paths to parse directly into training_clean.xyz")
-    
     args = parser.parse_args()
-    print(f"\n[→] Active Learning Pipeline Audit v1.0 | Round {ROUND}\n{'='*75}")
 
-    # Execute Manual Forcing Blocks
+    config_module = importlib.import_module(
+        f"configs.round_configs.round{args.round}_active_pipeline"
+    )
+    CONFIG: ActivePipelineConfig = config_module.CONFIG
+
+    print(f"\n[→] Active Learning Pipeline Audit v1.0 | Round {CONFIG.round}\n{'='*75}")
+
     if args.add_master:
         for out_file in args.add_master:
-            force_insert_cp2k_output(out_file, destination="master")
-
+            force_insert_cp2k_output(out_file, destination="master", config=CONFIG)
     if args.add_clean:
         for out_file in args.add_clean:
-            force_insert_cp2k_output(out_file, destination="clean")
-
-    # Execute Auditing Block
+            force_insert_cp2k_output(out_file, destination="clean", config=CONFIG)
     if args.audit:
-        print(f"Writing audit report for {len(args.audit)} target file(s)...")
-        print(f"\n[→] Auditing with force_cp2k={args.force_cp2k}, n_fps_frames={args.n_fps}\n{'-'*75}")
-        print(f"OUTPUT: cp2k_sp_round{ROUND}/submit_all.sh will be generated for any forced CP2K runs.")
+        print(f"[→] Auditing with force_cp2k={args.force_cp2k}, n_fps_frames={args.n_fps}\n{'-'*75}")
+        print(f"OUTPUT: {CONFIG.cp2k_dir}/submit_all.sh will be generated for any forced CP2K runs.")
         for target_file in args.audit:
-            track_and_recover_structures(target_file, force_cp2k=args.force_cp2k, n_fps_frames=args.n_fps)
+            track_and_recover_structures(target_file, config=CONFIG,
+                                          force_cp2k=args.force_cp2k, n_fps_frames=args.n_fps)
         

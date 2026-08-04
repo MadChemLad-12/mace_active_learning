@@ -14,12 +14,16 @@ Usage:
 """
 import argparse
 import sys
+
 import ase.io
 import torch
-from mace.calculators import MACECalculator
 from mace import data
+from mace.calculators import MACECalculator
 from mace.tools import torch_geometric
 
+from configs.round_configs.schema import ActivePipelineConfig
+
+CONFIG = ActivePipelineConfig()
 
 def build_worst_case_batch(pool_path, batch_size, max_count, r_max, z_table):
     frames = ase.io.read(pool_path, ":")
@@ -50,8 +54,8 @@ def build_worst_case_batch(pool_path, batch_size, max_count, r_max, z_table):
     return next(iter(loader))
 
 
-def profile_batch(model_path, pool_path, batch_size, max_count, r_max, device="cuda", threshold=0.85) -> bool:
-    calc = MACECalculator(model_paths=model_path, device=device, default_dtype="float32")
+def profile_batch(model_path, pool_path, batch_size, max_count, r_max, device=CONFIG.device, threshold=0.85) -> bool:
+    calc = MACECalculator(model_paths=model_path, device=device, default_dtype=CONFIG.dtype)
     model = calc.models[0]
     model.train()  # backward pass needs training-mode graph retention
 

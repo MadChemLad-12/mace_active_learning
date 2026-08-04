@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 @dataclass
 class NebGeoRunConfig:
+    round: int = 6
     # --- Device / precision ---
     device: str = "cuda"        # "cuda" or "cpu"
     dtype: str = "float32"      # must match your model's dtype
@@ -32,7 +33,7 @@ class NebGeoRunConfig:
     climb: bool = False                  # CI-NEB: finds exact transition state
     max_warnings: int = 8                # max atoms > fix_height_threshold before flagging
     max_threshold: float = 10.0          # Å, distance threshold for mapping consistency check
-
+    
     # --- AIMD (post-NEB sampling) ---
     skip_aimd: bool = True
     aimd_steps: int = 2000
