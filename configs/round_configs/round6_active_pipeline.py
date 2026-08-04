@@ -1,9 +1,9 @@
 """
-Round 6 config -- src/active_pipeline.py
+Round 1 config -- src/active_pipeline.py
 Copy this file to round7_active_pipeline.py at the start of the next round
 and `git diff` against this one to see exactly what changed.
 
-Changed from Round 5: <<fill this in when you copy forward>>
+Changed from Round 1: <<fill this in when you copy forward>>
 """
 
 from dataclasses import dataclass, field
@@ -59,3 +59,22 @@ class ActivePipelineConfig:
 
 
 CONFIG = ActivePipelineConfig()
+
+def get_coh_bounds(symbols_set: set, pt_count: int) -> tuple:
+    """
+    SCF sanity check bounds on raw CP2K energy.
+    cohesive = (E_total - sum(E0_ref)) / n_atoms, eV/atom
+    """
+    if pt_count > 3:                                          # Pt slab
+        coh_lo, coh_hi = -20.0, 10.0
+    elif pt_count > 0:                                        # dissolved Pt
+        coh_lo, coh_hi = -20.0, 10.0
+    elif "P" in symbols_set or "N" in symbols_set:
+        coh_lo, coh_hi = -20.0, 7.0
+    elif any(s in symbols_set for s in ("F", "S", "C")):       # Nafion-containing
+        coh_lo, coh_hi = -20.0, 10.0
+    elif symbols_set <= {"H", "O"}:                            # bulk water
+        coh_lo, coh_hi = -20.0, 10.0
+    else:                                                       # fallback
+        coh_lo, coh_hi = -20.0, 5.0
+    return coh_lo, coh_hi

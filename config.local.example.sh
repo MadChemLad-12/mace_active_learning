@@ -19,9 +19,6 @@ export EVAL_CONFIGS="test.xyz"
 # Fine-tuned model (for comparison scripts)
 export MACE_FINETUNED_MODEL="/path/to/mace_V4_active_learning_stagetwo.model"
 
-# CP2K library data directory
-export CP2K_LIBDIR="/path/to/cp2k/data"
-
 # CSV files
 export MACE_DEFAULT_CSV="/path/to/config.csv"
 # CSV file to use for neb_model_compare.py
