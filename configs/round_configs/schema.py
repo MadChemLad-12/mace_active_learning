@@ -5,11 +5,12 @@ from typing import Dict, List
 class ActivePipelineConfig:
     # --- General ---
     round: int = 1                     # overridden by args.target if provided
-    n_select_total: int = 300          # overridden by args.runs
+    n_select_total: int = 100          # overridden by args.runs
     max_atoms: int = 580               # cap to avoid oversized GPU jobs
     reuse_existing_cp2k: bool = True   # skip inputs for frames w/ valid CP2K output
     exclude_system_keywords: List[str] = field(default_factory=list)
-
+    check_slab_z: bool = False         # Whether to check if atoms go below the Z_slab
+    
     # --- MACE ---
     device: str = "cuda"
     dtype: str = "float32"
@@ -47,3 +48,22 @@ class ActivePipelineConfig:
         # Depends on `round`, so this is a property rather than a plain field --
         # guarantees it's always in sync even if round is overridden post-init.
         return f"cp2k_e0_round{self.round}"
+
+def get_coh_bounds(symbols_set: set, pt_count: int) -> tuple:
+    """
+    SCF sanity check bounds on raw CP2K energy.
+    cohesive = (E_total - sum(E0_ref)) / n_atoms, eV/atom
+    """
+    if pt_count > 3:                                          # Pt slab
+        coh_lo, coh_hi = -20.0, 10.0
+    elif pt_count > 0:                                        # dissolved Pt
+        coh_lo, coh_hi = -20.0, 10.0
+    elif "P" in symbols_set or "N" in symbols_set:
+        coh_lo, coh_hi = -20.0, 7.0
+    elif any(s in symbols_set for s in ("F", "S", "C")):       # Nafion-containing
+        coh_lo, coh_hi = -20.0, 10.0
+    elif symbols_set <= {"H", "O"}:                            # bulk water
+        coh_lo, coh_hi = -20.0, 10.0
+    else:                                                       # fallback
+        coh_lo, coh_hi = -20.0, 5.0
+    return coh_lo, coh_hi

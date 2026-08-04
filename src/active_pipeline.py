@@ -54,26 +54,19 @@ import glob
 from pathlib import Path
 apply_dftd3_cell_patch()
 import importlib
-from configs.constants import
-from configs.round_configs.schema
+from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON
+from configs.round_configs.schema import ActivePipelineConfig, get_coh_bounds
 
 # ============================================================
 # Configuration
 # ============================================================
 
-ROUND       = 1          # Increment each iteration
 _FOUNDATION_MODEL = os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model")
 MODEL_PATH = (f"mace_V{ROUND-1}_active_learning_stagetwo.model" if ROUND > 3
               else _FOUNDATION_MODEL)
 
 # Where neb_geo_run.py wrote its AL candidate files
 AL_INPUT_DIR  = "geo_opt_results/al_candidates"
-
-# How many frames to send to CP2K per round (total across all systems)
-N_SELECT_TOTAL = 100
-MAX_ATOMS = 500.0 # This is to prevent the data set becoming too large and wasting gpu
-REUSE_EXISTING_CP2K = True # If true, skip writing inputs for frames that already have valid CP2K outputs (useful for iterative rounds)
-EXCLUDE_SYSTEM_KEYWORDS = [] 
 
 def apply_round(n):
     """
@@ -88,73 +81,21 @@ def apply_round(n):
     FAILED_LOG = f"cp2k_sp_round{n}/failed_jobs.txt"
     print(f"[→] Round {n}  |  Model: {MODEL_PATH}  |  CP2K dir: {CP2K_DIR}")
 
-
-
-# --- Pathological-geometry triage before CP2K ---
-# If a candidate's *initial* MACE force exceeds this, it's far more likely to
-# be an overlap/clash artifact (e.g. raw FPS pick from a foreign dataset's
-# cell) than a genuinely interesting AL frame. We run a short, CAPPED
-# relaxation to remove the overlap -- not a full optimisation, since fully
-# converging would erase the very off-equilibrium character that makes a
-# frame worth sending to CP2K in the first place.
-GEOOPT_TRIGGER       = True   # Turns this feature on or off
-GEOOPT_TRIGGER_FORCE = 20.0   # eV/Å -- well above FORCE_THRESHOLD; this flags "broken", not "uncertain"
-GEOOPT_MAX_STEPS     = 30     # hard cap -- keep this cheap and avoid fully annealing the frame
-GEOOPT_FMAX_TARGET   = 2.0    # eV/Å -- loose target: "no longer exploding", not "converged minimum"
-APPLY_D3             = True   # Whether to include D3 in all calculations (MACE + D3) for this round. If False, only MACE is used.
-
-
-EXTERNAL_DATASETS = False  # add this to your config flags at the top
-
-# Additional data sets to parse for training
-EXTERNAL_SOURCES = {
-    #"mptrj_pt": {
-    #    "path": "training_data/mptrj-gga-ggapu/master_ranked_MPtrj_structures.extxyz",
-    #    "n_samples": 30,   # only 35 frames total — take most of them
-    #},
-    #"oc25_pt": {
-    #    "path": "hugface_data/train/master_ranked_OC25_structures.extxyz",
-    #    "n_samples": 90,   # 93 frames total — sample ~30
-    #},
-}
-
-REICO_SAMPLEING = True
-# --- REICO (random imaginary-chemical box) sampling config ---
-REICO_NUM            = 50     # number of random boxes generated per round
-REICO_MIN_ATOMS      = 20
-REICO_MAX_ATOMS      = 60
-REICO_VOL_PER_ATOM   = 12.0   # Å³/atom -- rough condensed-phase packing density,
-                               # box edge is derived from this + n_atoms so boxes
-                               # stay dense rather than dilute-gas-like
-REICO_MIN_DIST_SCALE = 0.6    # scales (covalent_radius_a + covalent_radius_b) to
-                               # get a per-pair minimum distance, instead of one
-                               # global cutoff that's wrong for both H-H and Pt-Pt
-
 # Output paths
 CP2K_DIR   = f"cp2k_sp_round{ROUND}"
 POOL_FILE  = "master_train_pool.xyz"
 CP2K_TIMEOUT = "3h"  # Per-job timeout for CP2K runs (adjust as needed)
 FAILED_LOG = f"{CP2K_DIR}/failed_jobs.txt"   # written by your timeout wrapper
+E0_DIR  = f"cp2k_e0_round{ROUND}"
 
 # Populated in __main__ when --ignore-failed is passed; read by write_all_sp_inputs()
 # so run_round() (which takes no args) can honor it without threading params everywhere.
 IGNORE_FAILED_NAMES = set()
-# Populated in __main__ alongside IGNORE_FAILED_NAMES: the atom-count above
-# which future candidates are preemptively skipped as OOM-risk. None = no
-# atom-count filtering (only exact-name skipping is applied).
-MAX_ATOMS_THRESHOLD = MAX_ATOMS
-
-# E0s Json
-E0_JSON = "E0s.json"
-E0_DIR  = f"cp2k_e0_round{ROUND}"
-E0_CELL_SIZE = 20.0  # 20x20x20 Angstrom box
-# Mapping for atomic numbers 
-Z_MAP = {"H": 1, "Li": 3, "C": 6, "O": 8, "F": 9, "P": 15, "S": 16, "Pt": 78}
 
 # ============================================================
 # MACE re-scoring helper
 # ============================================================
-def rescore_with_mace(frames, model_path, config):
+def rescore_with_mace(frames, model_path: str, config: ActivePipelineConfig):
     """
     Attach a fresh MACE calculator to every frame and compute forces.
     Needed when frames were loaded from disk without a live calculator.
@@ -253,10 +194,10 @@ def fps_sample_md_trajectory(frames, n_select, system_name):
 # Step 1 — Load candidate frames produced by neb_geo_run.py
 # ============================================================
 
-def _is_excluded(system_type: str) -> bool:
+def _is_excluded(system_type: str, config: ActivePipelineConfig) -> bool:
     """Return True if system_type matches any exclusion keyword (case-insensitive)."""
     s = system_type.lower()
-    return any(kw.lower() in s for kw in EXCLUDE_SYSTEM_KEYWORDS)
+    return any(kw.lower() in s for kw in config.EXCLUDE_SYSTEM_KEYWORDS)
 
 def load_candidates(al_input_dir):
     """
@@ -359,31 +300,12 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
 # ============================================================
 # Step 3 — CP2K single-point input generation
 # ============================================================
-LIBDIR = os.environ.get("CP2K_LIBDIR")
-if not LIBDIR:
-    raise ValueError("CP2K_LIBDIR environment variable is not set! Did you source config.local.sh?")
-
-METALS = {"Pt", "Li"}  # extend if other transition metals are added later
-
-KIND_PARAMS = {
-    "H":  ("DZVP-MOLOPT-SR-GTH-q1",  "GTH-PBE-q1"),
-    "C":  ("DZVP-MOLOPT-SR-GTH-q4",  "GTH-PBE-q4"),
-    "O":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
-    "F":  ("DZVP-MOLOPT-SR-GTH-q7",  "GTH-PBE-q7"),
-    "S":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
-    "Pt": ("DZVP-MOLOPT-SR-GTH-q18", "GTH-PBE-q18"),
-}
-
 KIND_TEMPLATE = """\
     &KIND {symbol}
       BASIS_SET {basis}
       POTENTIAL {potential}
     &END KIND"""
 
-# NOTE: {scf_block} replaces the old hardcoded &SCF section, and STRESS_TENSOR
-# is now driven by a flag instead of being unconditionally ANALYTICAL (see
-# write_cp2k_sp / stress_tensor arg) since it's a known memory culprit on
-# large (470-580+ atom) systems.
 CP2K_TEMPLATE = """\
 &GLOBAL
   PROJECT_NAME {name}
@@ -439,26 +361,6 @@ CP2K_TEMPLATE = """\
 {stress_tensor_line}\
 &END FORCE_EVAL
 """
-
-# Default cell dimensions per system type — used when a structure has no cell
-# (e.g. isolated molecules read from .cif without periodic boundary info).
-# Keys must match the system_type tag set by mace_geo_opt_base.py exactly
-# (case-insensitive comparison is used below).
-DEFAULT_CELLS = {
-    # Pt slab systems  (a, b, c) in Angstrom
-    "default":             (11.099, 9.612,  33.000),
-    # Nafion + Pt slab
-    "naf_naf":             (22.198, 19.224, 29.790),
-    "pt_nafion":           (22.198, 19.224, 29.790),
-    # Bulk dissolved systems
-    "bulk_nafion":         (11.099, 9.612,  21.220),
-    "bulk_water_pt":       (11.099, 9.612,  21.220),
-    # Dissolved oxide/hydroxide in Nafion
-    "dissolvedoh_nafion":  (11.099, 9.612,  33.000),
-    "dissolvedo2_nafion":  (11.099, 9.612,  33.000),
-    "dissolvedo_nafion":   (11.099, 9.612,  33.000),
-}
-
 
 def extract_valence_electrons(potential_str: str) -> int:
     """Extracts valence electron count (q-value) from GTH potential name (e.g. 'GTH-PBE-q18' -> 18)."""
@@ -689,7 +591,7 @@ def _load_geometry_index(cp2k_dir):
 
     return combined
 
-def _save_geometry_index(cp2k_dir, index):
+def _save_geometry_index(index):
     """Save index to global file in new dict format."""
     import json
     # Always write to global index — covers all rounds
@@ -938,7 +840,7 @@ trap cleanup INT TERM
             f.write(header)
         f.write("\n".join(job_blocks))
 
-def write_all_sp_inputs(selected_frames, cp2k_dir, cfg, ignore_names=None):
+def write_all_sp_inputs(selected_frames, cp2k_dir, config: ActivePipelineConfig, ignore_names=None):
     """
     Write CP2K single-point input files and submission scripts.
 
@@ -971,13 +873,13 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, cfg, ignore_names=None):
     os.makedirs(cp2k_dir, exist_ok=True)
 
     if ignore_names is None:
-        ignore_names = cfg.reuse_existing_cp2k
+        ignore_names = config.reuse_existing_cp2k
 
     # Load existing hash index (may be empty on first run)
-    geom_index   = _load_geometry_index(cp2k_dir) if cfg.reuse_existing_cp2k else {}
+    geom_index   = _load_geometry_index(cp2k_dir) if config.reuse_existing_cp2k else {}
 
     pool_hashes = set()
-    if cfg.reuse_existing_cp2k and Path(POOL_FILE).exists():
+    if config.reuse_existing_cp2k and Path(POOL_FILE).exists():
         try:
             pool_frames = read(POOL_FILE, index=":")
             pool_hashes = {get_atoms_hash(a) for a in pool_frames}
@@ -1002,9 +904,9 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, cfg, ignore_names=None):
         # Atom-count OOM-risk filter: skip anything at/above the size seen
         # among confirmed failures, regardless of whether this exact
         # structure has failed before.
-        if MAX_ATOMS_THRESHOLD is not None and n_atoms >= MAX_ATOMS_THRESHOLD:
+        if config.max_atoms is not None and n_atoms >= config.max_atoms:
             skipped_oom += 1
-            print(f"  [⊘] {name}: {n_atoms} atoms >= OOM threshold ({MAX_ATOMS_THRESHOLD}) — skipped")
+            print(f"  [⊘] {name}: {n_atoms} atoms >= OOM threshold ({config.max_atoms}) — skipped")
             continue
         
         # Exact-match filter: skip this specific structure if it already
@@ -1018,7 +920,7 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, cfg, ignore_names=None):
         all_jobs.append((name, inp))
         expected_out = Path(cp2k_dir) / f"{name}.out"
 
-        if REUSE_EXISTING_CP2K:
+        if config.reuse_existing_cp2k:
             # Level 1: direct .out check
             if _cp2k_output_is_complete(expected_out):
                 reused_direct += 1
@@ -1050,7 +952,7 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, cfg, ignore_names=None):
         new_index[get_atoms_hash(atoms)] = name
 
     # Persist updated index
-    if REUSE_EXISTING_CP2K:
+    if config.reuse_existing_cp2k:
         _save_geometry_index(cp2k_dir, new_index)
 
     n_total   = len(all_jobs)
@@ -1067,11 +969,11 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, cfg, ignore_names=None):
 
     print(f"\n[✓] CP2K input summary:")
     print(f"    Total frames:          {n_total}")
-    if MAX_ATOMS_THRESHOLD is not None:
-        print(f"    Skipped (OOM atom-count >= {MAX_ATOMS_THRESHOLD}): {skipped_oom}")
+    if config.max_atoms is not None:
+        print(f"    Skipped (OOM atom-count >= {config.max_atoms}): {skipped_oom}")
     if ignore_names:
         print(f"    Skipped (failed_jobs.txt match): {skipped_ignored}")
-    if REUSE_EXISTING_CP2K:
+    if config.reuse_existing_cp2k:
         print(f"    Skipped (direct):      {reused_direct}  (.out already present)")
         print(f"    Skipped (hash match):  {reused_hash}  (identical geometry seen before)")
         print(f"    Skipped (in pool):     {reused_pool}  (already in master_train_pool.xyz)")
@@ -1676,7 +1578,7 @@ def is_physically_reasonable(atoms, calc, round_num=1, check_slab_z=False, force
 # ============================================================
 # Pre-CP2K triage: capped relaxation for pathological initial forces
 # ============================================================
-def relax_pathological_frames(frames, calc, cfg):
+def relax_pathological_frames(frames, calc, config: ActivePipelineConfig):
     """
     For any frame whose initial MACE force magnitude exceeds `trigger_force`,
     run a short, CAPPED relaxation to remove pathological overlaps/clashes
@@ -1702,9 +1604,9 @@ def relax_pathological_frames(frames, calc, cfg):
     n_triggered = 0
     n_improved  = 0
 
-    trigger_force = cfg.geoopt_trigger_force
-    max_steps     = cfg.geoopt_max_steps
-    fmax_target   = cfg.geoopt_fmax_target
+    trigger_force = config.geoopt_trigger_force
+    max_steps     = config.geoopt_max_steps
+    fmax_target   = config.geoopt_fmax_target
     
     for atoms in frames:
         atoms_copy = atoms.copy()
@@ -1754,8 +1656,7 @@ def relax_pathological_frames(frames, calc, cfg):
 # ============================================================
 # REICO: random "imaginary chemical" box generation
 # ============================================================
-def create_random_box(elements, n_atoms, vol_per_atom=REICO_VOL_PER_ATOM,
-                       min_dist_scale=REICO_MIN_DIST_SCALE, max_attempts=300):
+def create_random_box(elements, n_atoms, config: ActivePipelineConfig, max_attempts=300):
     """
     Build one small periodic box containing `n_atoms` atoms drawn with
     repetition from `elements`. Two things matter here that a naive random
@@ -1775,6 +1676,9 @@ def create_random_box(elements, n_atoms, vol_per_atom=REICO_VOL_PER_ATOM,
     from ase.data import covalent_radii, atomic_numbers as ase_Z
     from ase.geometry import get_distances
 
+    vol_per_atom = config.reico_vol_per_atom
+    min_dist_scale = config.reico_min_dist_scale
+    
     edge = (n_atoms * vol_per_atom) ** (1 / 3)
     cell = [edge, edge, edge]
     chosen = list(np.random.choice(elements, size=n_atoms))
@@ -1812,26 +1716,23 @@ def create_random_box(elements, n_atoms, vol_per_atom=REICO_VOL_PER_ATOM,
 # Main entry points
 # ============================================================
 from mace.calculators import MACECalculator 
-def run_round():
+def run_round(config: ActivePipelineConfig):
     """Load MACE candidate files, select uncertain frames, write CP2K inputs."""
     print(f"\n{'='*60}")
-    print(f"  Active Learning Round {ROUND}")
-    print(f"  Model: {MODEL_PATH}")
+    print(f"  Active Learning Round {config.round}")
+    print(f"  Model: {_FOUNDATION_MODEL}")
     print(f"{'='*60}\n")
     skipped_unphysical = 0
-    
+
     # ---- NEB / GeoOpt candidates ----
     all_candidates = load_candidates(AL_INPUT_DIR)
-    
+
     print(f"\n[→] Re-scoring {len(all_candidates)} NEB/GeoOpt frames with MACE...")
-    all_candidates = rescore_with_mace(all_candidates, MODEL_PATH)
- 
-    # Load global geometry index once — used to check what's already done
-    geom_index = _load_geometry_index(CP2K_DIR) if REUSE_EXISTING_CP2K else {}
+    all_candidates = rescore_with_mace(all_candidates, _FOUNDATION_MODEL, config)
+
+    geom_index = _load_geometry_index(CP2K_DIR) if config.reuse_existing_cp2k else {}
+
     def _already_computed(atoms):
-        """Return True if this geometry already has a complete CP2K output."""
-        # Level 1: direct .out check using expected job name
-        # We don't know the name yet at selection time, so use hash only
         geom_hash = get_atoms_hash(atoms)
         entry = geom_index.get(geom_hash)
         if entry:
@@ -1840,148 +1741,118 @@ def run_round():
                 return True
         return False
 
-    # Score all candidates by MACE force magnitude
     print("\nScoring all candidates by MACE max force...")
     scored = []
     for atoms in all_candidates:
-        f = None
         if atoms.calc is not None:
             try:
                 f = atoms.get_forces()
                 score = float(np.max(np.linalg.norm(f, axis=1)))
             except Exception:
-                score = 0.0
+                f, score = None, 0.0
         else:
-            score = 0.0
+            f, score = None, 0.0
         scored.append((score, atoms, f))
 
-    # Sort by descending force magnitude — most uncertain first
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    # Walk down the ranked list, skipping already-computed geometries,
-    # until we have N_SELECT_TOTAL frames that genuinely need CP2K
     selected = []
     skipped_computed = 0
-    skipped_seen = set()  # hashes already in selected (avoid duplicates within batch)
+    skipped_seen = set()
+    n_select_total = config.n_select_total
+    print(f"\n[→] Selecting up to {n_select_total} frames that need CP2K...")
 
-    print(f"\n[→] Selecting up to {N_SELECT_TOTAL} frames that need CP2K...")
-    
-    calc_mace = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
-    if APPLY_D3:
+    calc_mace = MACECalculator(model_paths=_FOUNDATION_MODEL, device=config.device, default_dtype=config.dtype)
+    if config.apply_d3:
         print(f"  [→] D3 dispersion correction will be applied to MACE scores.")
         calc_DFT = TorchDFTD3Calculator(
-                    device="cuda",
+                    device=config.device,
                     damping="bj",
                     xc=cfg.get("dispersion_xc", "pbe"),
                     cutoff=cfg.get("dispersion_cutoff", 40.0),
                 )
-        calc = SumCalculator([calc_mace, calc_DFT])    
+        calc = SumCalculator([calc_mace, calc_DFT])
     else:
         print(f"  [→] No D3 dispersion correction applied to MACE scores.")
         calc = calc_mace
+
     for score, atoms, forces in scored:
-        if len(selected) >= N_SELECT_TOTAL:
+        if len(selected) >= n_select_total:
             break
-
         geom_hash = get_atoms_hash(atoms)
-
-        # Skip if identical geometry already in this batch
         if geom_hash in skipped_seen:
             continue
-
-        # Skip if already computed in any previous round
         if _already_computed(atoms):
             skipped_computed += 1
             continue
-
-        # Skip if below force threshold (only if we have enough candidates above it)
-        is_ok, reason = is_physically_reasonable(atoms, calc, round_num=ROUND, forces=forces)
+        is_ok, reason = is_physically_reasonable(atoms, calc, round_num=config.round, forces=forces)
         if not is_ok:
-            print(f"  [✗] Skipped (unphysical): "
-                f"{atoms.info.get('system_type','?')}  — {reason}")
+            print(f"  [✗] Skipped (unphysical): {atoms.info.get('system_type','?')}  — {reason}")
             skipped_unphysical += 1
             continue
-        
         skipped_seen.add(geom_hash)
         selected.append(atoms)
-        print(f"  [+] Selected frame {len(selected):3d}/{N_SELECT_TOTAL}  "
-              f"score={score:.3f} eV/Å  "
-              f"system={atoms.info.get('system_type','?')}")
+        print(f"  [+] Selected frame {len(selected):3d}/{n_select_total}  "
+              f"score={score:.3f} eV/Å  system={atoms.info.get('system_type','?')}")
 
     print(f"\n  [✓] Selected {len(selected)} frames for CP2K "
           f"    {skipped_computed} already-computed geometries skipped"
           f"    Unphysical/noisy : {skipped_unphysical}"
           f"    Remaining pool   : {len(scored) - len(selected) - skipped_computed - skipped_unphysical}")
 
-    if len(selected) < N_SELECT_TOTAL:
+    if len(selected) < n_select_total:
         print(f"  [!] Warning: only found {len(selected)} new frames — "
-              f"  candidate pool may be exhausted. Consider running more GeoOpts/NEBs.")
-    if EXTERNAL_DATASETS:
-        print(f"\n[→] Sampling external dataset structures for CP2K recalculation...")
+              f"  candidate pool may be exhausted.")
 
-        for src_name, src_cfg in EXTERNAL_SOURCES.items():
+    # --- External datasets: bool flag gates whether we run this block at all,
+    # the actual per-source settings live in config.external_sources ---
+    if config.external_datasets:
+        print(f"\n[→] Sampling external dataset structures for CP2K recalculation...")
+        for src_name, src_cfg in config.external_sources.items():
             src_path = src_cfg["path"]
             n_samples = src_cfg["n_samples"]
-
             if not os.path.exists(src_path):
                 print(f"  [!] File not found, skipping: {src_path}")
                 continue
-
             traj = read(src_path, index=":")
             print(f"  [{src_name}] Loaded {len(traj)} frames from {Path(src_path).name}")
-
-            # Strip any existing calculator/energy info — CP2K will provide new labels
-            # This is critical: you don't want OC25/MPtrj energies leaking into
-            # the CP2K input or confusing the parser later
             clean_traj = []
             for atoms in traj:
                 atoms_clean = atoms.copy()
                 atoms_clean.calc = None
-                # Remove energy/forces keys from info so they don't 
-                # conflict with CP2K output keys
                 for key in ("energy", "forces", "stress", "corrected_total_energy",
                             "REF_energy", "REF_forces", "REF_stress"):
                     atoms_clean.info.pop(key, None)
                     if key in atoms_clean.arrays:
                         del atoms_clean.arrays[key]
                 clean_traj.append(atoms_clean)
-
-            # FPS diversity sampling — reuses your existing function
             sampled = fps_sample_md_trajectory(clean_traj, n_samples, src_name)
-
-            # Screen for overlapping atoms / MACE force outliers, but skip
-            # Check 1.5 (the Pt-slab z-threshold) -- it assumes a slab
-            # geometry that doesn't apply to OC25/MPtrj structures.
             screened = []
             n_rejected = 0
             for atoms in sampled:
                 is_ok, reason = is_physically_reasonable(
-                    atoms, calc, round_num=ROUND, check_slab_z=False
+                    atoms, calc, round_num=config.round, check_slab_z=False
                 )
                 if is_ok:
                     screened.append(atoms)
                 else:
                     n_rejected += 1
                     print(f"    [✗] {src_name}: rejected — {reason}")
-
             selected.extend(screened)
             print(f"  [✓] {src_name}: added {len(screened)} frames "
-                f"({n_rejected} rejected by physicality screen) "
-                f"(total selected so far: {len(selected)})")
+                  f"({n_rejected} rejected) (total: {len(selected)})")
 
-    if REICO_SAMPLEING == True:
-        print(f"\n[→] REICO: generating {REICO_NUM} random imaginary-chemical boxes...")
-        unique_elements = sorted(set(
-            sym for atoms in selected for sym in atoms.get_chemical_symbols()
-        ))
+    if config.reico_sampling:
+        print(f"\n[→] REICO: generating {config.reico_num} random imaginary-chemical boxes...")
+        unique_elements = sorted(set(sym for atoms in selected for sym in atoms.get_chemical_symbols()))
         print(f"Creating REICO samples with {unique_elements}")
         if not unique_elements:
             print("  [!] REICO: no elements found in selected pool yet, skipping.")
         else:
             reico_frames = []
             n_failed = 0
-            for _ in range(REICO_NUM):
-                n_atoms = int(np.random.randint(REICO_MIN_ATOMS, REICO_MAX_ATOMS + 1))
+            for _ in range(config.reico_num):
+                n_atoms = int(np.random.randint(config.reico_min_atoms, config.reico_max_atoms + 1))
                 try:
                     box = create_random_box(unique_elements, n_atoms)
                 except ValueError as e:
@@ -1990,54 +1861,39 @@ def run_round():
                     continue
                 box.info["system_type"] = "reico_random"
                 reico_frames.append(box)
-
-            print(f"  [✓] REICO: generated {len(reico_frames)}/{REICO_NUM} boxes "
-                  f"({n_failed} failed placement)")
-
-            # These start from raw random placement, so they're guaranteed
-            # to need relaxing -- trigger_force=0.0 forces it every time,
-            # with a bigger step budget than the general triage gets since
-            # they start further from anything reasonable.
-            reico_frames = relax_pathological_frames(
-                reico_frames, calc, cfg=CONFIG
-            )
-
+            print(f"  [✓] REICO: generated {len(reico_frames)}/{config.reico_num} boxes ({n_failed} failed)")
+            reico_frames = relax_pathological_frames(reico_frames, calc, config=config)
             n_rejected = 0
             for box in reico_frames:
-                is_ok, reason = is_physically_reasonable(
-                    box, calc, round_num=ROUND, check_slab_z=False
-                )
+                is_ok, reason = is_physically_reasonable(box, calc, round_num=config.round, check_slab_z=False)
                 if is_ok:
                     selected.append(box)
                 else:
                     n_rejected += 1
                     print(f"    [✗] reico_random: rejected — {reason}")
-
             print(f"  [✓] REICO: added {len(reico_frames) - n_rejected} frames "
-                  f"({n_rejected} rejected by physicality screen) "
-                  f"(total selected so far: {len(selected)})")
-    
+                  f"({n_rejected} rejected) (total: {len(selected)})")
+
     print(f"\n[✓] Total frames queued for CP2K: {len(selected)}")
-    
     for atoms in selected:
         atoms.calc = None
 
-    if GEOOPT_TRIGGER == True:
+    if config.geoopt_trigger:
         print(f"\n[→] Pre-CP2K triage: checking for pathological initial forces "
-            f"(trigger > {GEOOPT_TRIGGER_FORCE} eV/Å)...")
-        selected = relax_pathological_frames(selected, calc, cfg=CONFIG)
+              f"(trigger > {config.geoopt_trigger_force} eV/Å)...")
+        selected = relax_pathological_frames(selected, calc, config=config)
 
-    e0_inputs = []  # ← fix for the UnboundLocalError
+    e0_inputs = []
     if not os.path.exists(E0_JSON):
         elements_needed = set()
         for atoms in selected:
             elements_needed.update(atoms.get_chemical_symbols())
         print(f"\n[→] {E0_JSON} not found. Generating E0 inputs for: {elements_needed}")
-        e0_inputs = generate_e0s_input(sorted(list(elements_needed)), E0_DIR)
+        e0_inputs = generate_e0s_input(sorted(elements_needed), config.e0_dir)
 
     write_all_sp_inputs(selected, CP2K_DIR)
 
-    selected_path = f"al_selected_round{ROUND}.xyz"
+    selected_path = f"al_selected_round{config.round}.xyz"
     write(selected_path, selected, format="extxyz")
     print(f"[✓] Selected frames saved to: {selected_path}")
 
@@ -2046,16 +1902,15 @@ def run_round():
         with open(submit_path, "a") as f:
             f.write("\n# --- E0 Isolated Atom Calculations ---\n")
             for name, inp in e0_inputs:
-                out = Path(E0_DIR) / f"{name}.out"
+                out = Path(config.e0_dir) / f"{name}.out"
                 f.write(f"cp2k.ssmp -i {inp} -o {out}\n")
-                
+
     print(f"\nNext steps:")
     print(f"  1. Run CP2K:  bash {CP2K_DIR}/submit_all.sh")
     print(f"  2. Parse:     python active_pipeline.py --parse")
     print(f"  3. Re-try failed jobs, then:  python active_pipeline.py --reparse")
-    print(f"  4. Retrain:   update ROUND to {ROUND+1} in both scripts, "
-          f"then run train_multiple.sh")
- 
+    print(f"  4. Retrain:   copy round{config.round}_active_pipeline.py to "
+          f"round{config.round+1}_active_pipeline.py, then run train_multiple.sh") 
  
 def parse_and_update():
     """Call after CP2K jobs finish: parse outputs, write MACE training data."""
@@ -2318,7 +2173,7 @@ def parse_positions_from_out(content):
 
     return symbols, np.array(positions)
  
-def parse_all_cp2k_outputs(target_round=None):
+def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
     """
     Scan ALL cp2k_sp_round* directories. For each complete .out file,
     read atomic positions from the matching .out file, parse energy and
@@ -2468,9 +2323,9 @@ def parse_all_cp2k_outputs(target_round=None):
             #Check the cell isnt too big for memory
             # Adjust MAX_ATOMS at the top of this file.
             n_atoms = len(atoms)
-            if n_atoms > MAX_ATOMS:
+            if n_atoms > config.max_atoms:
                 print(f"  [!] {out_path.name}: {n_atoms} atoms exceeds limit "
-                      f"({MAX_ATOMS}) — skipping")
+                      f"({config.max_atoms}) — skipping")
                 n_too_large += 1
                 parse_failed += 1
                 continue
@@ -2495,22 +2350,11 @@ def parse_all_cp2k_outputs(target_round=None):
             e_ref    = sum(E0s_ref.get(z, 0.0) for z in atoms.numbers)
             residual = (energy_eV - e_ref) / len(atoms)
 
-            if pt_count > 3:                                         # Pt slab
-                res_lo, res_hi = -20.0, 10.0
-            elif pt_count > 0:                                       # dissolved Pt
-                res_lo, res_hi = -20.0, 10.0
-            elif "P" in symbols_set or "N" in symbols_set:
-                res_lo, res_hi = -20.0, 7.0
-            elif any(s in symbols_set for s in ("F", "S", "C")):    # Nafion
-                res_lo, res_hi = -20.0, 10.0
-            elif symbols_set <= {"H", "O"}:                         # bulk water
-                res_lo, res_hi = -20.0, 10.0
-            else:                                                    # fallback
-                res_lo, res_hi = -20.0, 5.0               
-
-            if not (res_lo < residual < res_hi):
+            coh_lo, coh_hi = get_coh_bounds(symbols_set, pt_count)
+            
+            if not (coh_lo < residual < coh_hi):
                 print(f"  [!] {out_path.name}: residual={residual:.2f} eV/atom "
-                      f"(allowed {res_lo} to {res_hi}) — skipping")
+                      f"(allowed {coh_lo} to {coh_hi}) — skipping")
                 parse_failed += 1
                 continue
 
@@ -2604,7 +2448,7 @@ def parse_all_cp2k_outputs(target_round=None):
     print(f"  Already in pool         : {already_have}")
     print(f"  Parse failures / bad    : {parse_failed}")
     print(f"  Written to              : {POOL_FILE}")
-    print(f"  Max atoms allowed       : {MAX_ATOMS}")
+    print(f"  Max atoms allowed       : {config.max_atoms}")
 
     if not new_frames:
         print("\n[✓] Pool is already up to date — nothing to add.")
@@ -2664,129 +2508,114 @@ def _write_outputs(new_frames, failed):
  
 if __name__ == "__main__":
     import argparse
+    import importlib
     from pathlib import Path
+    from configs.round_configs.schema import ActivePipelineConfig
+    from configs.constants import Z_MAP, E0_JSON
+
     parser = argparse.ArgumentParser(description="MACE Active Learning Pipeline")
     apply_dftd3_cell_patch()
-    
-    # This allows you to call: python active_pipeline.py round 1
-    parser.add_argument("--parse",     action="store_true")
-    parser.add_argument("--ignore_failed", action="store_true",
-    help="Ignore failed jobs during recovery and focus purely on unstarted/missing candidates")
-    parser.add_argument("--ignore-failed", dest="ignore_failed_names", action="store_true",
-    help="Read failed_jobs.txt for the relevant round(s) and permanently skip any candidate "
-        "whose bare job name (not the r*_*.inp filename) appears there, when building "
-        "submit_missing.sh during --recover")
-    parser.add_argument("--reparse",   action="store_true")
-    parser.add_argument("--e0",        action="store_true")
-    parser.add_argument("--elements", nargs="+", type=str, help="Space-separated list of element symbols (e.g. -e Pt O C F)")
-    parser.add_argument("--parse-all", action="store_true", dest="parse_all")
-    parser.add_argument("--target",    type=int, default=None, help="Target round number for --parse-all and --recover (optional)")
-    parser.add_argument("--dissolve",  action="store_true")
-    parser.add_argument("--recover",   action="store_true", help="Analyze missing frames, FPS prioritize, and write new inputs")
-    parser.add_argument("--audit-jobs", nargs="+", default=[], help="List of specific job names to audit")
-    parser.add_argument("--requeue", action="store_true", help="Append the audited jobs to a submission script if they failed")
-    parser.add_argument("--runs",      type=int, default=100, help="How many cp2k runs are required")
-    parser.add_argument("--model",     type=str, default="mace-mp-0b3-medium-float32.model", help="What model to validate with?")
-    parser.add_argument(
-    "--exclude",
-    nargs="*",
-    default=[],
-    metavar="KEYWORD",
-    help="Exclude systems whose system_type contains any of these strings (case-insensitive). "
-         "e.g. --exclude DRY WET bulk_water"
-)
-    
-    parser.add_argument("round_num", type=int, nargs="?", default=None, help="Round number (optional)")  
-    
-    args = parser.parse_args()
-    ROUND = args.target if args.target is not None else 1    
-    CP2K_DIR = f"cp2k_sp_round{ROUND}"
 
+    parser.add_argument("--parse", action="store_true")
+    parser.add_argument("--ignore_failed", action="store_true",
+        help="Ignore failed jobs during recovery and focus purely on unstarted/missing candidates")
+    parser.add_argument("--skip-failed-names", dest="ignore_failed_names", action="store_true",
+        help="Read failed_jobs.txt for the relevant round(s) and permanently skip any candidate "
+             "whose bare job name appears there, when building submit_missing.sh during --recover")
+    parser.add_argument("--reparse", action="store_true")
+    parser.add_argument("--e0", action="store_true")
+    parser.add_argument("--elements", nargs="+", type=str)
+    parser.add_argument("--parse-all", action="store_true", dest="parse_all")
+    parser.add_argument("--target", type=int, default=None, required=True,
+        help="Round number -- required, drives which round config is loaded")
+    parser.add_argument("--dissolve", action="store_true")
+    parser.add_argument("--recover", action="store_true")
+    parser.add_argument("--audit-jobs", nargs="+", default=[])
+    parser.add_argument("--requeue", action="store_true")
+    parser.add_argument("--runs", type=int, default=None,
+        help="Override CONFIG.n_select_total for this run")
+    parser.add_argument("--model", type=str, default=None,
+        help="Override CONFIG.model_path for this run")
+    parser.add_argument("--exclude", nargs="*", default=[], metavar="KEYWORD")
+    args = parser.parse_args()
+
+    # --- Load the round config -- single source of truth for ROUND from here on ---
     config_module = importlib.import_module(
-    f"configs.round_configs.round{args.round}_active_pipeline"
+        f"configs.round_configs.round{args.target}_active_pipeline"
     )
-    CONFIG: ActivePipelineConfig = config_module.CONFIG    
-    
-    print(f"[→] Round {ROUND}  |  Model: {args.model}  |  CP2K dir: {CP2K_DIR}")
+    CONFIG: ActivePipelineConfig = config_module.CONFIG
+
+    # --- CLI overrides, applied explicitly (only if the user actually passed them) ---
+    if args.model is not None:
+        _FOUNDATION_MODEL = args.model  # see note below on model_path
+    if args.runs is not None:
+        CONFIG.n_select_total = args.runs
+    if args.exclude:
+        CONFIG.exclude_system_keywords.extend(args.exclude)
+        print(f"[→] Excluding system keywords: {CONFIG.exclude_system_keywords}")
+
+    print(f"[→] Round {CONFIG.round}  |  Model: {args.model_path}  |  CP2K dir: {CONFIG.cp2k_dir}")
     print("Starting execution for round context...\n")
 
     # -------------------------------------------------------------
-    # PRE-SCAN STEP: Pre-check and print ignored/failed frames FIRST
+    # PRE-SCAN STEP
     # -------------------------------------------------------------
-    ignored_set = scan_and_report_failed_jobs(ROUND, ignore_failed=args.ignore_failed)
+    ignored_set = scan_and_report_failed_jobs(CONFIG.round, ignore_failed=args.ignore_failed)
 
+    max_atoms_threshold = CONFIG.max_atoms
     if args.ignore_failed_names:
-        IGNORE_FAILED_NAMES = load_failed_job_names(CP2K_DIR)
-        if IGNORE_FAILED_NAMES:
-            print(f"[→] --ignore-failed: loaded {len(IGNORE_FAILED_NAMES)} name(s) from "
-                  f"{CP2K_DIR}/failed_jobs.txt — these will be skipped as submit_missing.sh candidates.")
+        ignore_failed_names = load_failed_job_names(CP2K_DIR)
+        al_file_for_round = f"al_selected_round{CONFIG.round}.xyz"
+        if ignore_failed_names:
+            print(f"[→] loaded {len(ignore_failed_names)} name(s) from "
+                  f"{CP2K_DIR}/failed_jobs.txt — will be skipped.")
         else:
-            print(f"[→] --ignore-failed: no failed_jobs.txt entries found in {CP2K_DIR} yet.")
+            print(f"[→] no failed_jobs.txt entries found in {CP2K_DIR} yet.")
 
-            al_file_for_round = f"al_selected_round{ROUND}.xyz"
-            if MAX_ATOMS_THRESHOLD is not None:
-                # Manually set at the top of the file (module-level default) —
-                # respect it and skip auto-estimation entirely.
-                print(f"[→] --ignore-failed: using manually-set MAX_ATOMS_THRESHOLD = "
-                    f"{MAX_ATOMS_THRESHOLD} atoms (auto-estimate skipped).")
-            else:
-                MAX_ATOMS_THRESHOLD = estimate_oom_atom_threshold(al_file_for_round, IGNORE_FAILED_NAMES)
-                if MAX_ATOMS_THRESHOLD is None:
-                    print(f"[→] --ignore-failed: could not estimate an OOM atom-count threshold "
-                        f"(no failed names matched frames in {al_file_for_round}) — "
-                        f"falling back to exact-name skipping only.")
-            
-    # -------------------------------------------------------------
-    # REGULAR LEARNING / LOADING LOOP
-    # -------------------------------------------------------------
-    print("="*60)
-    print(f"  Active Learning Round {ROUND}")
-    print(f"  Model: {args.model}")
-    print("="*60)    
-    
-   # 1. Handle global parameters first (Unlinked from the action chain)
-    if args.model:
-        MODEL_PATH = args.model
-    if args.exclude:
-        EXCLUDE_SYSTEM_KEYWORDS.extend(args.exclude)
-        print(f"[→] Excluding system keywords: {EXCLUDE_SYSTEM_KEYWORDS}")    
-    if args.round_num is not None:
-        apply_round(args.round_num)
-    else:
-        apply_round(ROUND) # Fallback to default global variable
-    DEFAULT_ELEMENTS = ["H", "C", "O", "F", "S", "Pt"]
-    if args.e0:
-        elements = args.elements if args.elements else DEFAULT_ELEMENTS        
-        if args.parse:
-            parse_e0_results(E0_DIR, elements)
+        # NOTE: moved out of the else-branch -- this should run whether or not
+        # failed names were found, not only when the list came back empty.
+        if max_atoms_threshold is not None:
+            print(f"[→] using manually-set max_atoms_threshold = {max_atoms_threshold} "
+                  f"(auto-estimate skipped).")
         else:
-            jobs = generate_e0s_input(elements, E0_DIR)
+            max_atoms_threshold = estimate_oom_atom_threshold(al_file_for_round, ignore_failed_names)
+            if max_atoms_threshold is None:
+                print(f"[→] could not estimate an OOM atom-count threshold — "
+                      f"falling back to exact-name skipping only.")
+    else:
+        ignore_failed_names = set()
+
+    print("="*60)
+    print(f"  Active Learning Round {CONFIG.round}")
+    print(f"  Model: {_FOUNDATION_MODEL}")
+    print("="*60)
+
+    default_elements = list(Z_MAP.keys())
+
+    if args.e0:
+        elements = args.elements if args.elements else default_elements
+        if args.parse:
+            parse_e0_results(CONFIG.e0_dir, elements)
+        else:
+            jobs = generate_e0s_input(elements, CONFIG.e0_dir)
             _write_submission_script(
-                Path(E0_DIR)/"submit_e0.sh", jobs, E0_DIR, "E0s", len(elements), 0
+                Path(CONFIG.e0_dir)/"submit_e0.sh", jobs, CONFIG.e0_dir, "E0s", len(elements), 0
             )
     elif args.recover:
-        recover_and_prioritize_missing(target_round=args.target, 
-                                       n_runs=args.runs,
-                                       ignore_failed=args.ignore_failed,
-                                       ignore_failed_by_name=args.ignore_failed_names)    
+        recover_and_prioritize_missing(target_round=CONFIG.round,
+                                        n_runs=CONFIG.n_select_total,
+                                        ignore_failed=args.ignore_failed,
+                                        ignore_failed_by_name=args.ignore_failed_names)
     elif args.audit_jobs:
-        audit_and_requeue_specific_jobs(
-            target_keywords=args.audit_jobs, 
-            target_round=args.target, 
-            requeue=args.requeue
-        )
+        audit_and_requeue_specific_jobs(target_keywords=args.audit_jobs,
+                                         target_round=CONFIG.round,
+                                         requeue=args.requeue)
     elif args.reparse:
-        reparse_failed()          
+        reparse_failed()
     elif args.parse_all:
-        # --parse-all 4  sets round_num=4; --parse-all --target 4 also works
-        target = args.target if args.target is not None else args.round_num
-        parse_all_cp2k_outputs(target_round=target)
+        parse_all_cp2k_outputs(target_round=CONFIG.round, config=CONFIG)
     elif args.parse:
-        parse_and_update()        
+        parse_and_update()
     else:
-        # This triggers when NO specific action flag (--parse, --parse-all, etc.) is passed
-        # This matches your Bash Step 2: running a standard optimization round iteration
         print(f"Starting standard execution for round context...")
-        DISSOLVED = args.dissolve
-        N_SELECT_TOTAL = args.runs
-        run_round()
+        run_round(config=CONFIG)
