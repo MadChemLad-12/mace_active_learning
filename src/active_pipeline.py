@@ -54,14 +54,14 @@ import glob
 from pathlib import Path
 apply_dftd3_cell_patch()
 import importlib
-from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON, MASTER_TRAIN
+from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON, MASTER_TRAIN, FOUNDATION_MODEL_PATH
 from configs.round_configs.schema import ActivePipelineConfig, get_coh_bounds
 
 # ============================================================
 # Configuration
 # ============================================================
 
-_FOUNDATION_MODEL = os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model")
+_FOUNDATION_MODEL = FOUNDATION_MODEL_PATH
 MODEL_PATH = (f"mace_V{ROUND-1}_active_learning_stagetwo.model" if ROUND > 3
               else _FOUNDATION_MODEL)
 
@@ -76,7 +76,7 @@ def apply_round(n):
     global ROUND, MODEL_PATH, CP2K_DIR, FAILED_LOG
     ROUND      = n
     MODEL_PATH = (f"mace_V{ROUND-1}_active_learning_stagetwo.model" if ROUND > 3
-               else "mace-mp-0b3-medium-float32.model")
+               else FOUNDATION_MODEL_PATH)
     CP2K_DIR   = f"cp2k_sp_round{n}"
     FAILED_LOG = f"cp2k_sp_round{n}/failed_jobs.txt"
     print(f"[→] Round {n}  |  Model: {MODEL_PATH}  |  CP2K dir: {CP2K_DIR}")

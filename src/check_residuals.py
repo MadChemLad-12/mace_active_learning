@@ -15,7 +15,7 @@ apply_dftd3_cell_patch()
 import json
 ### CONSTANTS
 from configs.round_configs.round6_check_residual import CONFIG, get_residual_bounds, get_force_bounds
-from configs.constants import EXTERNAL_SYSTEM_TYPES, E0_JSON, MASTER_TRAIN, CLEAN_TRAIN, BAD_TRAIN
+from configs.constants import EXTERNAL_SYSTEM_TYPES, E0_JSON, FOUNDATION_MODEL_PATH, MASTER_TRAIN, CLEAN_TRAIN, BAD_TRAIN
 
 MAX_FORCE_REF = CONFIG.max_force_ref   # eV/Å
 MAX_RMSE      = CONFIG.max_rmse    # meV/Å
@@ -98,18 +98,18 @@ if found_models and len(found_models)>3:
     mace_path= found_models[-1]
 else:
     print(f"No new model found using foundational")
-    mace_path=os.environ.get("MACE_FOUNDATION_MODEL")
+    mace_path=FOUNDATION_MODEL_PATH
 
 from mace.calculators import MACECalculator
 calc_mace = MACECalculator(
     model_paths=mace_path,
-    device="cuda",
-    default_dtype="float32"
+    device=CONFIG.device,
+    default_dtype=CONFIG.dtype
 )
 if CONFIG.apply_d3:
     print(f"[→] Including D3 in calculations (MACE + D3)")
     calc_DFT = TorchDFTD3Calculator(
-                    device="cuda",
+                    device=CONFIG.device,
                     damping="bj",
                     xc=cfg.get("dispersion_xc", "pbe"),
                     cutoff=cfg.get("dispersion_cutoff", 40.0),

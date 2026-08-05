@@ -64,14 +64,14 @@ from scipy.spatial import cKDTree
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 
 from patches import apply_dftd3_cell_patch
-from configs.constants import
 from configs.round_configs.schema import NebGeoRunConfig
+from configs.constants import FOUNDATION_MODEL_PATH, FINETUNED_MODEL_PATH
 apply_dftd3_cell_patch()
 
 # ==============================================================================
 # SETTINGS — CHANGE THESE
 # ==============================================================================
-MACE_MODEL_PATH = os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model")
+MACE_MODEL_PATH = FOUNDATION_MODEL_PATH
 OUTPUT_DIR      = "geo_opt_results"          # Where to save optimised structures
 PATH_CSV = os.environ.get("MACE_DEFAULT_CSV", "configs/configs.csv")
 
@@ -202,6 +202,8 @@ def check_mapping_consistency(atoms_ref, atoms_to_map, config: NebGeoRunConfig):
     cell = atoms_ref.get_cell()
     pbc  = atoms_ref.get_pbc()
     
+    print(f" checking where is config {config}... type(config)={type(config)}")
+    
     def check_element(element):
         """Find all atoms of one element that moved too far — runs in its own thread."""
         problems = []
@@ -219,7 +221,8 @@ def check_mapping_consistency(atoms_ref, atoms_to_map, config: NebGeoRunConfig):
         return problems
 
     # Threshold Logic: Only trigger detailed logs if we cross the warning limit
-    with ThreadPoolExecutor(max_workers=config.nodes) as executor:
+    nodes = int(config.nodes) if hasattr(config, "nodes") else 6
+    with ThreadPoolExecutor(max_workers=nodes) as executor:
         futures = [executor.submit(check_element, el) for el in unique_elements]
         problematic_atoms = [p for f in futures for p in f.result()]
 
@@ -531,7 +534,7 @@ def neb_workflow(init_atoms, final_atoms, calc, config: NebGeoRunConfig, name, u
         print(f"  [✓] All {len(init_syms)} atom indices and elements match.")
 
     # ── 3. Consistency check (shared by both paths) ───────────────────────────
-    if check_mapping_consistency(init_atoms, final_atoms):
+    if check_mapping_consistency(init_atoms, final_atoms, config):
         print(f"  [✓] Structures consistent within {config.max_threshold} Å "
               f"({config.max_warnings} warning threshold).")
     else:
@@ -593,7 +596,10 @@ def neb_workflow(init_atoms, final_atoms, calc, config: NebGeoRunConfig, name, u
     # Using ase neb tools
     nebtools = NEBTools(images)
     fig, ax = plt.subplots(figsize=(8, 5))
-    nebtools.plot_band(ax=ax)
+    try: 
+        nebtools.plot_band(ax=ax)
+    except Exception as e:
+        print(f"[!] Error occurred while plotting NEB band: {e}")
     ax.set_title("NEB Energy Barrier Profile", fontsize=14, fontweight='bold')
     ax.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
@@ -1013,7 +1019,7 @@ def main():
     make_output_dir()
     persistent_cache = load_persistent_cache()
     
-    calc  = load_mace(config=CONFIG)
+    calc  = load_mace(CONFIG)
     start = time.perf_counter()
 
     total_configs = len(CONFIGURATIONS)
@@ -1023,11 +1029,11 @@ def main():
     print(f" Starting calculations for {total_configs} configurations...\n")
     print(f"{'Config':<20} {'Initial':<25} {'Final':<25}")
     
-    for i, config in enumerate(CONFIGURATIONS):
-        print(f"Calculation {config['name']} started at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        name       = config["name"]
-        init_path  = config["initial"]
-        final_path = config["final"]
+    for i, structure in enumerate(CONFIGURATIONS):
+        print(f"Calculation {structure['name']} started at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        name       = structure["name"]
+        init_path  = structure["initial"]
+        final_path = structure["final"]
 
         print_progress_bar(i + 1, total_configs, name)
         print(f"  Initial: {init_path}")
@@ -1100,10 +1106,10 @@ def main():
                 opt_atoms = atoms
             else:
                 print(f"  [→] Optimising {label} structure...")
-                opt_atoms, e, conv, steps, fmax = optimise_structure(atoms, calc, label, name, config = CONFIG)
+                opt_atoms, e, conv, steps, fmax = optimise_structure(atoms, calc, label, name, CONFIG)
 
             if e is not None:
-                status = classify_stability(conv, fmax, steps, config = CONFIG)
+                status = classify_stability(conv, fmax, steps, CONFIG)
                 print(f"  [{'✓' if conv else '~'}] {label.capitalize()}: E = {e:.4f} eV | Steps = {steps} | {status}")
 
                 out_file = os.path.join(OUTPUT_DIR, f"{name}_{label}_opt.cif")
@@ -1148,7 +1154,7 @@ def main():
             
         if not CONFIG.skip_neb:
             if init_for_neb is not None and final_for_neb is not None and init_ok and final_ok:
-                neb_workflow(init_for_neb, final_for_neb, calc, name, config = CONFIG)
+                neb_workflow(init_for_neb, final_for_neb, calc, CONFIG, name)
                 config_result["neb_run"] = True
             else:
                 print(f"  [!] Skipping NEB for {name}: endpoints not ready/stable.")
@@ -1189,7 +1195,7 @@ def main():
                 for endpoint_label, endpoint_atoms in aimd_targets:
                     aimd_name = f"{name}_{endpoint_label}"
                     print(f"  [→] Running AIMD on {endpoint_label} structure of {name}...")
-                    aimd_frames = aimd_sampling(endpoint_atoms, calc, aimd_name, config = CONFIG)
+                    aimd_frames = aimd_sampling(endpoint_atoms, calc, aimd_name, CONFIG)
                     total_aimd_frames += len(aimd_frames)
                 config_result["aimd_run"]    = total_aimd_frames > 0
                 config_result["aimd_frames"] = total_aimd_frames

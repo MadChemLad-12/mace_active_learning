@@ -14,6 +14,9 @@ class CheckResidualConfig:
     max_rmse: float = 1000.0       # meV/Å, max RMSE force for a structure to be valid
     non_pt_thresh: float = 5.3     # Å, z-height threshold for non-Pt atoms entering slab
     max_count: int = 400           # max atom count allowed in a system
+    
+    device: str = "cuda"             # device for MACE calculations (cuda or cpu)
+    dtype: str = "float32"           # dtype for MACE calculations (float32 or float64)
 
 
 CONFIG = CheckResidualConfig()
