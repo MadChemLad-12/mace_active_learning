@@ -300,6 +300,9 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
 # ============================================================
 # Step 3 — CP2K single-point input generation
 # ============================================================
+METALLIC_ELEMENTS = {"Pt", "Pd", "Au", "Ag", "Cu", "Ni", "Fe", "Al", "Ti", "Rh", "Ir", "Ru"}
+SEMIMETAL_MOTIFS = {"graphene"}
+
 KIND_TEMPLATE = """\
     &KIND {symbol}
       BASIS_SET {basis}
@@ -342,6 +345,7 @@ CP2K_TEMPLATE = """\
         &END PAIR_POTENTIAL
       &END vdW_POTENTIAL
     &END XC
+{kpoint_block}\    
   &END DFT
   &SUBSYS
     &CELL
@@ -361,6 +365,138 @@ CP2K_TEMPLATE = """\
 {stress_tensor_line}\
 &END FORCE_EVAL
 """
+
+### Kpiont logic
+# Global override switch. Three states:
+#   None  -> auto-detect per structure (default, recommended)
+#   False -> force Gamma-only (1 1 1) for every system, no matter what
+#   True  -> force k-point sampling on for every system, using KPOINTS_DEFAULT_MESH
+# Flip this manually for control runs / debugging without touching the
+# detection logic below.
+FORCE_KPOINTS = False
+
+# Fallback mesh used when FORCE_KPOINTS = True and no density-based mesh
+# is computed (e.g. you just want a blanket override).
+KPOINTS_DEFAULT_MESH = (8, 8, 8)
+
+# Target k-point spacing in 1/Angstrom. Denser (smaller number) for
+# metals/semimetals, relaxed (larger number) for insulators/liquids/molecules.
+KPOINT_SPACING_METAL = 0.25
+KPOINT_SPACING_INSULATOR = 0.35
+
+# Vacuum padding (Angstrom) above which a structure is treated as an
+# isolated cluster/molecule rather than a genuinely periodic system,
+# regardless of element content.
+ISOLATED_VACUUM_THRESHOLD = 8.0
+
+PT_PT_COUPLING_DISTANCE = 8.0  # Angstrom; beyond this, treat periodic
+                                 # Pt images as electronically decoupled
+
+def _is_isolated_cluster(atoms, vacuum_threshold: float = ISOLATED_VACUUM_THRESHOLD) -> bool:
+    """True if atoms occupy a small region of a much larger cell (cluster/
+    molecule in a vacuum box) — i.e. not physically periodic despite pbc=True."""
+    cell = atoms.get_cell()
+    if np.allclose(cell, 0.0):
+        return True  # no cell at all -> definitely not periodic
+    pos = atoms.get_positions()
+    extent = pos.max(axis=0) - pos.min(axis=0)
+    cell_lengths = atoms.cell.lengths()
+    vacuum = cell_lengths - extent
+    return bool(np.all(vacuum > vacuum_threshold))
+
+
+def _is_graphene_like(atoms, planarity_tol: float = 0.3) -> bool:
+    """Rough structural check: planar, all-carbon, honeycomb-ish sheet.
+    Deliberately conservative — false negatives here just mean you fall
+    back to the metal/insulator spacing logic, which is still safe."""
+    symbols = set(atoms.get_chemical_symbols())
+    if symbols != {"C"}:
+        return False
+    z = atoms.get_positions()[:, 2]
+    return (z.max() - z.min()) < planarity_tol
+
+
+def _contains_metal(atoms) -> bool:
+    return any(s in METALLIC_ELEMENTS for s in atoms.get_chemical_symbols())
+
+def _metal_is_isolated_impurity(atoms) -> bool:
+    """True if metal atoms are dilute/isolated point defects (large periodic
+    separation between images, no metal-metal periodic network) rather than
+    part of an extended metallic lattice or slab."""
+    symbols = atoms.get_chemical_symbols()
+    metal_indices = [i for i, s in enumerate(symbols) if s in METALLIC_ELEMENTS]
+    if not metal_indices:
+        return False
+    if len(metal_indices) > 9:
+        # crude: if multiple metal atoms are close together, treat as a
+        # cluster/extended region, not isolated impurities
+        pos = atoms.get_positions()[metal_indices]
+        from scipy.spatial.distance import pdist
+        if pdist(pos).min() < PT_PT_COUPLING_DISTANCE:
+            return False
+    cell_lengths = atoms.cell.lengths()
+    pbc = atoms.get_pbc()
+    # check periodic self-image separation in each periodic direction
+    return all(
+        (not pbc[i]) or cell_lengths[i] > PT_PT_COUPLING_DISTANCE
+        for i in range(3)
+    )
+
+def determine_kpoints(atoms, name: str = "") -> tuple[int, int, int]:
+    """
+    Single source of truth for k-point mesh selection.
+
+    Priority:
+      1. FORCE_KPOINTS global override (False -> Gamma, True -> default mesh)
+      2. Isolated cluster / molecule-in-a-box detection -> Gamma
+      3. Density-based Monkhorst-Pack mesh, denser for metals/graphene-like
+         motifs, relaxed for everything else (water, ionic liquids, organics)
+
+    Returns an (nx, ny, nz) tuple for the CP2K &KPOINT SCHEME MONKHORST-PACK line.
+    """
+    if FORCE_KPOINTS is False:
+        return (1, 1, 1)
+    if FORCE_KPOINTS is True:
+        return tuple(KPOINTS_DEFAULT_MESH)
+
+    if _is_isolated_cluster(atoms):
+        return (1, 1, 1)
+
+    host_is_dispersive = _is_graphene_like(atoms)
+    metal_isolated = _metal_is_isolated_impurity(atoms)
+    
+    if not host_is_dispersive and metal_isolated:
+        return (1, 1, 1)
+    
+    pbc = atoms.get_pbc()
+    cell_lengths = atoms.cell.lengths()
+    needs_dense = _contains_metal(atoms) or _is_graphene_like(atoms)
+    spacing = KPOINT_SPACING_METAL if needs_dense else KPOINT_SPACING_INSULATOR
+
+    mesh = []
+    for i in range(3):
+        if not pbc[i] or cell_lengths[i] == 0.0:
+            mesh.append(1)
+            continue
+        n = max(1, int(np.ceil(2 * np.pi / (cell_lengths[i] * spacing))))
+        mesh.append(n)
+
+    if name:
+        tag = "metal/semimetal" if needs_dense else "insulator/molecular"
+        print(f"    [k-pts] {name}: {tuple(mesh)} ({tag}, spacing={spacing} 1/A)")
+
+    return tuple(mesh)
+
+
+def _build_kpoint_block(atoms, name: str = "") -> str:
+    """Returns the &KPOINT block text, or empty string for Gamma-only
+    (CP2K defaults to Gamma when no &KPOINT block is present, so we omit
+    it entirely rather than writing a redundant 1 1 1 mesh)."""
+    mesh = determine_kpoints(atoms, name=name)
+    if mesh == (1, 1, 1):
+        return ""
+    nx, ny, nz = mesh
+    return f"    &KPOINT\n        SCHEME  MONKHORST-PACK  {nx}  {ny}  {nz}\n    &END KPOINT\n"
 
 def extract_valence_electrons(potential_str: str) -> int:
     """Extracts valence electron count (q-value) from GTH potential name (e.g. 'GTH-PBE-q18' -> 18)."""
@@ -445,7 +581,7 @@ def _build_scf_block(atoms) -> str:
         return """\
     &SCF
       SCF_GUESS ATOMIC
-      MAX_SCF 100
+      MAX_SCF 150
       EPS_SCF 1.0E-6
       ADDED_MOS 0
       &OT ON
@@ -518,6 +654,7 @@ def write_cp2k_sp(atoms, name, outdir, stress_tensor=True, libdir=LIBDIR):
     )
 
     scf_block = _build_scf_block(atoms)
+    kpoint_block = _build_kpoint_block(atoms, name=name)
 
     if stress_tensor:
         stress_print = "    &STRESS_TENSOR\n    &END STRESS_TENSOR"
@@ -530,6 +667,7 @@ def write_cp2k_sp(atoms, name, outdir, stress_tensor=True, libdir=LIBDIR):
         name=name, a=a, b=b, c=c,
         coords=coords.rstrip(), kinds=kinds,
         scf_block=scf_block, libdir=libdir,
+        kpoint_block=kpoint_block,
         stress_print=stress_print, stress_tensor_line=stress_tensor_line,
     )
 
