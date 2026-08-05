@@ -19,6 +19,10 @@ if not LIBDIR:
         "Did you source config.local.sh?"
     )
 
+# MACE MODEL PATHS
+FOUNDATION_MODEL_PATH="/home/user/Documents/Programs/For_GIT/MACE_CP2K_pipeline/mace-mp-0b3-medium-float32.model"
+FINETUNED_MODEL_PATH="/home/user/Documents/Programs/Python/ASE/MACE/active_learning/mace_V5_active_learning_stagetwo.model"
+
 # --- Atomic number mapping ---
 Z_MAP = {"H": 1, "Li": 3, "C": 6, "O": 8, "F": 9, "P": 15, "S": 16, "Pt": 78}
 

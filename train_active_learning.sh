@@ -139,11 +139,11 @@ EVAL_CONFIGS="${EVAL_CONFIGS}"
 VALIDATION_FRACTION=0.1
 BATCH_SIZE=4
 LR=0.0001
-MAX_EPOCHS=500
-SWA_START=430
+MAX_EPOCHS=2
+SWA_START=1
 PATIENCE=70
 R_MAX=5.0
-NUM_SAMPLES_PT=1200   # Materials Project frames to mix in during multi-head training
+NUM_SAMPLES_PT=0   # Materials Project frames to mix in during multi-head training
 FLOAT_TYPE="float32"
 
 # Weights
