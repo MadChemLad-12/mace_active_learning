@@ -20,11 +20,10 @@ run_training_round() {
     
     echo "=== Training for round $ROUND ==="
     # Internal timing/naming
-    local TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    local START_TIME=$(date +%s)
+    local "$TIMESTAMP"="$(date +%Y%m%d_%H%M%S)"
+    local "$START_TIME"="$(date +%s)"
     [ -z "$FOUNDATION" ] && FOUNDATION="${MACE_FOUNDATION_MODEL}"
-    local MACE_OSAKA="${MACE_PATH}mace-osaka24-medium_float32.model"
-    local NEW_MODEL="mace_V${ROUND}_active_learning_final.model"
+    local "$NEW_MODEL"="mace_V${ROUND}_active_learning_final.model"
 
     echo "-----------------------------------------------------------------------"
     echo "ROUND $ROUND | Geo: $GEO_OPT_RUN | Pipe: $PIPELINE_RUN | CP2K: $CP2K_RUN"
@@ -56,7 +55,6 @@ run_training_round() {
         --runs "${RUNS}" \
         --model "${FOUNDATION}" \
         --target "$ROUND"
-        "$ROUND"   
         big_gap     
     fi
 
@@ -85,7 +83,8 @@ run_training_round() {
 
     # Step 5: Retrain MACE
     big_gap
-    python ${MACE_PATH}analysis/compare_models.py --make-held-out
+    python ${MACE_PATH}analysis/compare_models.py \
+    --make-held-out
 
     big_gap
     track_memory &
@@ -113,44 +112,42 @@ run_training_round() {
     # Step 6: Compare
     if [ "$COMPARE_MODELS" = "True" ]; then
         echo comparing models and analyzing results...
-        python ${MACE_PATH}analysis/compare_models.py \
+        python "${MACE_PATH}analysis/compare_models.py" \
         --outdir comparison_results \
         --test held_out.xyz \
-        --models $FOUNDATION mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
+        --models "$FOUNDATION" mace_V*_active_learning.model mace_V*_active_learning_stagetwo.model 
         big_gap
     fi  
 
 
     echo Checking the loss function and best performing instances
-    python ${MACE_PATH}analysis/plotloss.py \
-    --log pipeline_$ROUND.log \
+    python "${MACE_PATH}analysis/plotloss.py" \
+    --log "pipeline_$ROUND.log" \
     --head Default \
     --out comparison_results/
 
-    local END_TIME=$(date +%s)
-    local TIMETAKEN=$(( (END_TIME - START_TIME) / 60))
+    local "$END_TIME"="$(date +%s)"
+    local "$TIMETAKEN"="$(( (END_TIME - START_TIME) / 60))"
     echo "Round $ROUND completed in $TIMETAKEN minutes."
 }
 
-#ONCE THE CURRENT RUN IS DONE. WE DO IT AGAIN
-# Run one instance
-R=1
+R=6
 EXCLUDE_KEYWORDS=""   # set to "" to disable
-GEO_OPT_RUN="True"   
-SKIP_NEB="False"
-SKIP_AIMD="True"
-SKIP_PLM="False" ### Plumed isnt really what I was looking for?
+GEO_OPT_RUN="True"    # set to True if you want to run geometry optimizations
+SKIP_NEB="False"      # set NEB to True if you want to skip NEB calculations
+SKIP_AIMD="False"      # set AIMD to True if you want to run AIMD simulations
+SKIP_PLM="True" ### Plumed is not working yet, so we skip it for now
         
-PIPELINE_RUN="True"
+PIPELINE_RUN="True"   # set to True if you want to generate cp2k inputs
 
-TRAINING_PATH="training_clean.xyz"
+TRAINING_PATH="${MACE_TRAINING_PATH}"
 FOUNDATION="${MACE_FOUNDATION_MODEL}"
 
-CP2K_RUN="True"
-RUNS="1"
+CP2K_RUN="True"       # set to True if you want to run CP2K calculations
+RUNS="1"              # set to the number of cp2k calculations
 
-pre_flight="True"
-COMPARE_MODELS="True"
+pre_flight="True"     # set to True if you want to run the OOM pre-flight check before training
+COMPARE_MODELS="True" # set to True if you want to compare models after training
 
 echo "Starting Round $R. Logging to pipeline_$R.log"
 run_training_round $R 2>&1 | tee "pipeline_$R.log"

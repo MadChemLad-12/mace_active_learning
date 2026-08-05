@@ -69,3 +69,4 @@ config.local.sh
 *.sif
 settings.json
 launch.json
+dump_env.sh
