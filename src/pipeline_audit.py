@@ -38,6 +38,7 @@ from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
+from configs.constants import CLEAN_TRAIN, MASTER_TRAIN, BAD_TRAIN
 from configs.round_configs.schema import ActivePipelineConfig
 from src.active_pipeline import (
     write_cp2k_sp, parse_cell_from_out, parse_positions_from_out,
@@ -165,7 +166,7 @@ def force_insert_cp2k_output(out_file_path, config: ActivePipelineConfig, destin
     atoms.info["source"] = "cp2k_sp"
 
     # Check for exact duplicate geometry entries in target file before appending
-    target_file = "master_train_pool.xyz" if destination == "master" else "training_clean.xyz"
+    target_file = MASTER_TRAIN if destination == "master" else CLEAN_TRAIN
     new_hash = get_atoms_hash(atoms)
     
     if Path(target_file).exists():
@@ -259,9 +260,9 @@ def track_and_recover_structures(file_path, config: ActivePipelineConfig,force_c
             "1. Found in AL Candidates Folder (.extxyz)": False,
             "2. CP2K Configuration Built (.inp)": False,
             "3. CP2K Run Evaluated/Succeeded (.out)": False,
-            "4. Inserted into Master Train Pool (master_train_pool.xyz)": False,
-            "5. Passed Checks into Training Clean (training_clean.xyz)": False,
-            "5b. Flagged/Rejected in Outlier Log (training_bad.xyz)": False
+            f"4. Inserted into Master Train Pool ({MASTER_TRAIN})": False,
+            f"5. Passed Checks into Training Clean ({CLEAN_TRAIN})": False,
+            f"5b. Flagged/Rejected in Outlier Log ({BAD_TRAIN})": False
         }
         
         # Quick check algorithms matching previous implementations
@@ -289,9 +290,9 @@ def track_and_recover_structures(file_path, config: ActivePipelineConfig,force_c
                         break
             if found_inp: break
 
-        for filename, stage_key in [("master_train_pool.xyz", "4. Inserted into Master Train Pool (master_train_pool.xyz)"),
-                                   ("training_clean.xyz", "5. Passed Checks into Training Clean (training_clean.xyz)"),
-                                   ("training_bad.xyz", "5b. Flagged/Rejected in Outlier Log (training_bad.xyz)")]:
+        for filename, stage_key in [(MASTER_TRAIN, f"4. Inserted into Master Train Pool ({MASTER_TRAIN})"),
+                                   (CLEAN_TRAIN, f"5. Passed Checks into Training Clean ({CLEAN_TRAIN})"),
+                                   (BAD_TRAIN, f"5b. Flagged/Rejected in Outlier Log ({BAD_TRAIN})")]:
             if Path(filename).exists():
                 try:
                     for frame in read(filename, index=":"):

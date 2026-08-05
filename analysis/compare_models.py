@@ -49,7 +49,7 @@ from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
-from configs.constants import HELD_OUT, E0_JSON
+from configs.constants import HELD_OUT, E0_JSON, CLEAN_TRAIN, BAD_TRAIN, HELD_OUT, MASTER_TRAIN
 from configs.round_configs.round6_check_residual import CONFIG
 
 # ==============================================================================
@@ -490,9 +490,9 @@ def print_and_save_summary(all_metrics, labels, outdir):
 # Held-out set helper
 # ==============================================================================
 def create_held_out_set(
-    pool_file="training_clean.xyz",
-    held_out_file="held_out.xyz",
-    cleaned_pool_file="train_compare.xyz",
+    pool_file=MASTER_TRAIN,
+    held_out_file=HELD_OUT,
+    cleaned_pool_file=CLEAN_TRAIN,
     n=50,
     seed=42,
 ):

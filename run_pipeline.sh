@@ -147,7 +147,7 @@ TRAINING_PATH="training_clean.xyz"
 FOUNDATION="${MACE_FOUNDATION_MODEL}"
 
 CP2K_RUN="True"
-RUNS="50"
+RUNS="1"
 
 pre_flight="True"
 COMPARE_MODELS="True"

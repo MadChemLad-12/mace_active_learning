@@ -27,6 +27,7 @@ import argparse
 import numpy as np
 from pathlib import Path
 from ase.io import read, write
+from configs.constants import CLEAN_TRAIN, MASTER_TRAIN
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Import production functions from your pipeline
@@ -225,7 +226,7 @@ def step_parse(frames):
     # ── write output ─────────────────────────────────────────────────────────
     if parsed:
         # Safety: refuse to write if OUTPUT_XYZ is the training pool
-        assert OUTPUT_XYZ not in ("master_train_pool.xyz", "training_clean.xyz"), \
+        assert OUTPUT_XYZ not in (MASTER_TRAIN, CLEAN_TRAIN), \
             "OUTPUT_XYZ must not point to a training file!"
 
         write(OUTPUT_XYZ, parsed, format="extxyz")
@@ -247,7 +248,7 @@ def step_parse(frames):
 
     print(f"\n    Total: {n_total}  parsed: {len(parsed)}  failed: {len(failed)}")
     print(f"\n[!] {OUTPUT_XYZ} is a VALIDATION FILE.")
-    print(f"    Do NOT add it to master_train_pool.xyz or training_clean.xyz.")
+    print(f"    Do NOT add it to {MASTER_TRAIN} or {CLEAN_TRAIN}.")
 
     return parsed, failed
 
