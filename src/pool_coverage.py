@@ -13,11 +13,12 @@ import hashlib
 from pathlib import Path
 from collections import defaultdict
 from ase.io import read
+from configs.constants import CLEAN_TRAIN, MASTER_TRAIN
 
 # ── Config ──────────────────────────────────────────────────────────────────
 CANDIDATE_DIR   = "geo_opt_results/al_candidates"       # where mace_neb_*.extxyz and mace_geoopt_*.extxyz live
-POOL_FILE       = "master_train_pool.xyz"
-TRAINING_FILE   = "training_clean.xyz"  # post-cleaning file used for training
+POOL_FILE       = MASTER_TRAIN
+TRAINING_FILE   = CLEAN_TRAIN  # post-cleaning file used for training
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_atoms_hash(atoms):

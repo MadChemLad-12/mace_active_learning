@@ -68,3 +68,4 @@ train_V*_*.log
 config.local.sh
 *.sif
 settings.json
+launch.json

@@ -54,7 +54,7 @@ import glob
 from pathlib import Path
 apply_dftd3_cell_patch()
 import importlib
-from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON
+from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON, MASTER_TRAIN
 from configs.round_configs.schema import ActivePipelineConfig, get_coh_bounds
 
 # ============================================================
@@ -83,7 +83,7 @@ def apply_round(n):
 
 # Output paths
 CP2K_DIR   = f"cp2k_sp_round{ROUND}"
-POOL_FILE  = "master_train_pool.xyz"
+POOL_FILE  = MASTER_TRAIN
 CP2K_TIMEOUT = "3h"  # Per-job timeout for CP2K runs (adjust as needed)
 FAILED_LOG = f"{CP2K_DIR}/failed_jobs.txt"   # written by your timeout wrapper
 E0_DIR  = f"cp2k_e0_round{ROUND}"

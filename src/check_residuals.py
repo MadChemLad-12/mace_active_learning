@@ -15,7 +15,7 @@ apply_dftd3_cell_patch()
 import json
 ### CONSTANTS
 from configs.round_configs.round6_check_residual import CONFIG, get_residual_bounds, get_force_bounds
-from configs.constants import EXTERNAL_SYSTEM_TYPES, E0_JSON
+from configs.constants import EXTERNAL_SYSTEM_TYPES, E0_JSON, MASTER_TRAIN, CLEAN_TRAIN, BAD_TRAIN
 
 MAX_FORCE_REF = CONFIG.max_force_ref   # eV/Å
 MAX_RMSE      = CONFIG.max_rmse    # meV/Å
@@ -33,7 +33,7 @@ except FileNotFoundError:
     E0s_ref = {}
     
 elements = E0s_ref.keys()
-frames = ase.io.read("master_train_pool.xyz", ":")
+frames = ase.io.read(MASTER_TRAIN, ":")
 
 HASH_PRECISION = 4 
 def get_atoms_hash(atoms):
@@ -245,8 +245,8 @@ for info in bad_info:
     print(f"  {info}")
 
 # Write — both lists contain only Atoms objects now
-ase.io.write("training_clean.xyz", good)
-ase.io.write("training_bad.xyz",   bad)
+ase.io.write(CLEAN_TRAIN, good)
+ase.io.write(BAD_TRAIN,   bad)
 
 print(f"The E0s of the clean data is")
 generate_E0s(good)
