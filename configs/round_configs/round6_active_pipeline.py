@@ -13,7 +13,7 @@ from typing import Dict, List
 @dataclass
 class ActivePipelineConfig:
     # --- General ---
-    round: int = 1                     # overridden by args.target if provided
+    round: int = 6                     # overridden by args.target if provided
     n_select_total: int = 300          # overridden by args.runs
     max_atoms: int = 580               # cap to avoid oversized GPU jobs
     reuse_existing_cp2k: bool = True   # skip inputs for frames w/ valid CP2K output
