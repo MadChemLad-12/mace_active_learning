@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Sync env from config.local.sh",
+      "type": "shell",
+      "command": "${workspaceFolder}/dump_env.sh",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "bashdb",
+      "request": "launch",
+      "name": "Debug pipeline.sh",
+      "program": "${workspaceFolder}/run_pipeline.sh",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "terminalKind": "integrated"
+    },
+    {
+      "name": "Debug neb_geo_run.py",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/home/user/miniconda3/envs/mace_test/bin/python",
+      "program": "${workspaceFolder}/src/neb_geo_run.py",
+      "args": ["--round", "6", "--model", "/home/user/Documents/Programs/For_GIT/MACE_CP2K_pipeline/mace-mp-0b3-medium-float32.model"],
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Sync env from config.local.sh",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Debug active_pipeline.py (select frames)",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/home/user/miniconda3/envs/mace_test/bin/python",
+      "program": "${workspaceFolder}/src/active_pipeline.py",
+      "args": ["--runs", "1", "--model", "/home/user/Documents/Programs/For_GIT/MACE_CP2K_pipeline/mace-mp-0b3-medium-float32.model", "--target", "6"],
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Sync env from config.local.sh",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Debug active_pipeline.py (--parse-all)",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/home/user/miniconda3/envs/mace_test/bin/python",
+      "program": "${workspaceFolder}/src/active_pipeline.py",
+      "args": ["--parse-all", "--target", "6", "--model", "/home/user/Documents/Programs/For_GIT/MACE_CP2K_pipeline/mace-mp-0b3-medium-float32.model"],
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Sync env from config.local.sh",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Debug check_residuals.py",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/home/user/miniconda3/envs/mace_test/bin/python",
+      "program": "${workspaceFolder}/src/check_residuals.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Sync env from config.local.sh",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+  ]
+}
