@@ -54,43 +54,52 @@ import glob
 from pathlib import Path
 apply_dftd3_cell_patch()
 import importlib
-from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON, MASTER_TRAIN, FOUNDATION_MODEL_PATH
+root_dir = Path(__file__).resolve().parent.parent
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON, MASTER_TRAIN, FOUNDATION_MODEL_PATH, FINETUNED_MODEL_PATH
 from configs.round_configs.schema import ActivePipelineConfig, get_coh_bounds
 
 # ============================================================
 # Configuration
 # ============================================================
+ROUND = None
 
 _FOUNDATION_MODEL = FOUNDATION_MODEL_PATH
-MODEL_PATH = (f"mace_V{ROUND-1}_active_learning_stagetwo.model" if ROUND > 3
-              else _FOUNDATION_MODEL)
-
-# Where neb_geo_run.py wrote its AL candidate files
-AL_INPUT_DIR  = "geo_opt_results/al_candidates"
-
-def apply_round(n):
-    """
-    Update all round-dependent globals to match round N.
-    Called once at startup after argument parsing.
-    """
-    global ROUND, MODEL_PATH, CP2K_DIR, FAILED_LOG
-    ROUND      = n
-    MODEL_PATH = (f"mace_V{ROUND-1}_active_learning_stagetwo.model" if ROUND > 3
-               else FOUNDATION_MODEL_PATH)
-    CP2K_DIR   = f"cp2k_sp_round{n}"
-    FAILED_LOG = f"cp2k_sp_round{n}/failed_jobs.txt"
-    print(f"[→] Round {n}  |  Model: {MODEL_PATH}  |  CP2K dir: {CP2K_DIR}")
-
+MODEL_PATH = None
 # Output paths
-CP2K_DIR   = f"cp2k_sp_round{ROUND}"
+CP2K_DIR   = None
 POOL_FILE  = MASTER_TRAIN
 CP2K_TIMEOUT = "3h"  # Per-job timeout for CP2K runs (adjust as needed)
-FAILED_LOG = f"{CP2K_DIR}/failed_jobs.txt"   # written by your timeout wrapper
-E0_DIR  = f"cp2k_e0_round{ROUND}"
-
-# Populated in __main__ when --ignore-failed is passed; read by write_all_sp_inputs()
-# so run_round() (which takes no args) can honor it without threading params everywhere.
+FAILED_LOG = None   # written by your timeout wrapper
+E0_DIR  = None
 IGNORE_FAILED_NAMES = set()
+AL_INPUT_DIR  = "geo_opt_results/al_candidates"
+
+def apply_round(n: int, custom_model_path: str = None):
+    """
+    Update all round-dependent globals to match round N.
+    Called once at startup after argument parsing and config loading.
+    """
+    global ROUND, MODEL_PATH, CP2K_DIR, FAILED_LOG, E0_DIR
+
+    ROUND = n
+
+    # Model path resolution logic
+    if custom_model_path is not None:
+        MODEL_PATH = custom_model_path
+    elif ROUND > 3:
+        MODEL_PATH = f"mace_V{ROUND-1}_active_learning_stagetwo.model"
+    else:
+        MODEL_PATH = _FOUNDATION_MODEL
+
+    CP2K_DIR = f"cp2k_sp_round{n}"
+    FAILED_LOG = f"cp2k_sp_round{n}/failed_jobs.txt"
+    E0_DIR = f"cp2k_e0_round{ROUND}"
+
+    print(
+        f"[→] Round {n} initialized  |  Model: {MODEL_PATH}  |  CP2K dir: {CP2K_DIR}"
+    )
 
 # ============================================================
 # MACE re-scoring helper
@@ -2544,6 +2553,14 @@ if __name__ == "__main__":
         f"configs.round_configs.round{args.target}_active_pipeline"
     )
     CONFIG: ActivePipelineConfig = config_module.CONFIG
+
+    if args.target != CONFIG.round:
+        raise ValueError(
+            f"round{args.target}_neb_geo_run.py has CONFIG.round={CONFIG.round} but CLI args say {args.target}. "
+            f"Internally these must match. Did you forget to update CONFIG.round after copying the file forward?"
+        )
+
+    apply_round(args.target, args.model)
 
     # --- CLI overrides, applied explicitly (only if the user actually passed them) ---
     if args.model is not None:
