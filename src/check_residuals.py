@@ -1,4 +1,5 @@
 import ase.io
+import ase
 import numpy as np
 from collections import defaultdict
 import hashlib
@@ -14,6 +15,10 @@ from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 import json
 ### CONSTANTS
+import sys
+root_dir = Path(__file__).resolve().parent.parent
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
 from configs.round_configs.round6_check_residual import CONFIG, get_residual_bounds, get_force_bounds
 from configs.constants import EXTERNAL_SYSTEM_TYPES, E0_JSON, FOUNDATION_MODEL_PATH, MASTER_TRAIN, CLEAN_TRAIN, BAD_TRAIN
 
@@ -31,9 +36,13 @@ except FileNotFoundError:
     # Fix 1: Handle a missing file
     print(f"Error: The file '{E0_JSON}' could not be found.")
     E0s_ref = {}
-    
+
+if Path(MASTER_TRAIN).exists():
+    frames = ase.io.read(MASTER_TRAIN, ":")
+else:
+    print(f"[!] {MASTER_TRAIN} not found.")
+
 elements = E0s_ref.keys()
-frames = ase.io.read(MASTER_TRAIN, ":")
 
 HASH_PRECISION = 4 
 def get_atoms_hash(atoms):
