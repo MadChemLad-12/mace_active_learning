@@ -54,7 +54,7 @@ def compute_soap_descriptors(all_atoms, species, r_cut=6.0, n_max=8, l_max=6):
         average="inner",  # one averaged descriptor per structure
     )
     descriptors = soap.create(all_atoms, n_jobs=1)
-    return np.asarray(descriptors)
+    return np.asarray(descriptors, dtype=np.float32)
 
 
 def greedy_fps(candidate_descs, reference_descs, n_select):
@@ -96,16 +96,42 @@ def greedy_fps(candidate_descs, reference_descs, n_select):
     return selected
 
 
-def _min_dist_to_set(query_descs, ref_descs, chunk=2000):
-    """Memory-friendly min pairwise distance from each query to ref set."""
+def _min_dist_to_set(query_descs, ref_descs, chunk=200, ref_chunk=2000):
+    """
+    Memory-friendly min pairwise distance from each query to ref set.
+
+    Uses the expansion |a-b|^2 = |a|^2 + |b|^2 - 2 a.b (via matmul) instead
+    of materializing a (chunk, n_ref, n_features) broadcast array, and
+    chunks over both query and reference sets so memory stays O(chunk *
+    ref_chunk) rather than O(n_query * n_ref * n_features). Everything is
+    float32.
+    """
+    query_descs = np.ascontiguousarray(query_descs, dtype=np.float32)
+    ref_descs = np.ascontiguousarray(ref_descs, dtype=np.float32)
+
     n = query_descs.shape[0]
-    out = np.empty(n)
-    for start in range(0, n, chunk):
-        end = min(start + chunk, n)
-        # (chunk, n_ref)
-        diff = query_descs[start:end, None, :] - ref_descs[None, :, :]
-        d = np.linalg.norm(diff, axis=-1)
-        out[start:end] = d.min(axis=1)
+    out = np.full(n, np.inf, dtype=np.float32)
+
+    ref_sq = np.einsum("ij,ij->i", ref_descs, ref_descs)  # (n_ref,)
+
+    for q_start in range(0, n, chunk):
+        q_end = min(q_start + chunk, n)
+        q_block = query_descs[q_start:q_end]                # (chunk, d)
+        q_sq = np.einsum("ij,ij->i", q_block, q_block)       # (chunk,)
+
+        block_min = np.full(q_end - q_start, np.inf, dtype=np.float32)
+        for r_start in range(0, ref_descs.shape[0], ref_chunk):
+            r_end = min(r_start + ref_chunk, ref_descs.shape[0])
+            r_block = ref_descs[r_start:r_end]               # (ref_chunk, d)
+
+            # (chunk, ref_chunk)
+            dot = q_block @ r_block.T
+            dist_sq = q_sq[:, None] + ref_sq[None, r_start:r_end] - 2.0 * dot
+            np.maximum(dist_sq, 0.0, out=dist_sq)  # guard tiny negatives from fp error
+            block_min = np.minimum(block_min, dist_sq.min(axis=1))
+
+        out[q_start:q_end] = np.sqrt(block_min)
+
     return out
 
 
@@ -113,7 +139,7 @@ def _min_dist_to_set(query_descs, ref_descs, chunk=2000):
 # Committee disagreement (feature 2: uncertainty, togglable)
 # --------------------------------------------------------------------------
 
-def compute_committee_disagreement(all_atoms, model_paths, device="cpu"):
+def compute_committee_disagreement(all_atoms, model_paths, device="cuda"):
     """
     Run each committee model on each structure, return per-structure
     disagreement score = std across models of (energy per atom) combined
@@ -124,7 +150,7 @@ def compute_committee_disagreement(all_atoms, model_paths, device="cpu"):
     from mace.calculators import MACECalculator
 
     calcs = [
-        MACECalculator(model_paths=[p], device=device) for p in model_paths
+        MACECalculator(model_paths=[p], device=device, float_type="float32") for p in model_paths
     ]
 
     n_models = len(calcs)
@@ -163,6 +189,7 @@ def main():
     p.add_argument("--master", required=True, help="Path to master_train.xyz")
     p.add_argument("--n-select", type=int, required=True, help="Number of frames to select")
     p.add_argument("--out", default="selected_frames.xyz", help="Output xyz path")
+    p.add_argument("--split", action="store_true", help="Split output into individual xyz files (one per frame)")
 
     p.add_argument("--r-cut", type=float, default=6.0)
     p.add_argument("--n-max", type=int, default=8)
@@ -175,7 +202,7 @@ def main():
                     help="Explicitly disable committee disagreement (feature 2), diversity-only mode.")
     p.add_argument("--committee-weight", type=float, default=0.5,
                     help="Blend weight for committee score vs FPS rank when --committee is used (0-1).")
-    p.add_argument("--device", default="cpu", help="cpu or cuda, for committee MACE calculators")
+    p.add_argument("--device", default="cuda", help="cpu or cuda, for committee MACE calculators")
 
     p.add_argument("--pool-factor", type=int, default=3,
                     help="When using committee, first FPS-select pool_factor * n_select candidates "
@@ -225,6 +252,10 @@ def main():
     selected_atoms = [candidate_atoms[i] for i in selected_idx]
     write(args.out, selected_atoms)
     print(f"Wrote {len(selected_atoms)} frames to {args.out}")
+    
+    if args.split:
+        for i, atoms in enumerate(selected_atoms):
+            write(f"{args.out[:-4]}_{i}.xyz", [atoms])
 
 
 if __name__ == "__main__":
