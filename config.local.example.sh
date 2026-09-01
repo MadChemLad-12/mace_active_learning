@@ -13,7 +13,7 @@ export MACE_PATH="/path/to/mace_active_learning"
 
 # Path to training data (called training_clean.xyz normally)
 export MACE_TRAINING_PATH="training_clean.xyz"
-# Pth to seperate evaluation data (often data the model has not seen before)
+# Path to seperate evaluation data (often data the model has not seen before)
 export EVAL_CONFIGS="test.xyz"
 
 # Fine-tuned model (for comparison scripts)
@@ -35,5 +35,24 @@ export SIF_PATH="/home/jack/containers/mace_pipeline.sif"
 export WORK_DIR="/scratch/jack/runs"
 export MODELS_DIR="/scratch/jack/models"
 
+# MACE HYPERPARAMETERS
+export VALIDATION_FRACTION=0.1
+export BATCH_SIZE=4
+export LR=0.0001
+export MAX_EPOCHS=2
+export SWA_START=1
+export PATIENCE=70
+export R_MAX=5.0
+export NUM_SAMPLES_PT=0   # Materials Project frames to mix in during multi-head training
+export FLOAT_TYPE="float32"
+
+# Weights
+export FORCES_WEIGHT=100
+export ENERGY_WEIGHT=1
+export STRESS_WEIGHT=0
+# SWA weights
+export FORCES_SWA=100
+export ENERGY_SWA=5
+export STRESS_SWA=0
 
 
