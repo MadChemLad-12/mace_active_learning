@@ -136,29 +136,29 @@ fi
 EVAL_CONFIGS="${EVAL_CONFIGS}"
 
 # Training hyperparameters
-VALIDATION_FRACTION=0.1
-BATCH_SIZE=4
-LR=0.0001
-MAX_EPOCHS=2
-SWA_START=1
-PATIENCE=70
-R_MAX=5.0
-NUM_SAMPLES_PT=0   # Materials Project frames to mix in during multi-head training
-FLOAT_TYPE="float32"
+VALIDATION_FRACTION="${VALIDATION_FRACTION:-0.1}"
+BATCH_SIZE="${BATCH_SIZE:-4}"
+LR="${LR:-0.0001}"
+MAX_EPOCHS="${MAX_EPOCHS:-2}"
+SWA_START="${SWA_START:-1}"
+PATIENCE="${PATIENCE:-70}"
+R_MAX="${R_MAX:-5.0}"
+NUM_SAMPLES_PT="${NUM_SAMPLES_PT:-0}"   # Materials Project frames to mix in during multi-head training
+FLOAT_TYPE="${FLOAT_TYPE:-float32}"
 
 # Weights
-FORCES_WEIGHT=100
-ENERGY_WEIGHT=1
-STRESS_WEIGHT=0
-
-FORCES_SWA=100
-ENERGY_SWA=5
-STRESS_SWA=0
+FORCES_WEIGHT="${FORCES_WEIGHT:-100}"
+ENERGY_WEIGHT="${ENERGY_WEIGHT:-1}"
+STRESS_WEIGHT="${STRESS_WEIGHT:-0}"
+# SWA weights
+FORCES_SWA="${FORCES_SWA:-100}"
+ENERGY_SWA="${ENERGY_SWA:-5}"
+STRESS_SWA="${STRESS_SWA:-0}"
 
 # Elements present across ALL your systems (atomic numbers)
 # Load JSON E0 values
-
-JSON_FILE="E0_values.json"
+# JSON_FILE="E0_values.json"
+JSON_FILE=$(python3 -c "from configs.constants import E0_JSON; print(E0_JSON)")
 
 # Extract ATOMIC_NUMBERS using inline Python
 ATOMIC_NUMBERS=$(python3 -c "
@@ -180,7 +180,7 @@ echo "ATOMIC_NUMBERS=$ATOMIC_NUMBERS"
 echo "E0_VALUES=$E0_VALUES"
 
 # Path to parity plot script
-PARITY_SCRIPT="plot_parity.py"
+PARITY_SCRIPT="${MACE_PATH}/analysis/plot_parity.py"
 
 # =============================================================================
 # DERIVED PATHS — do not edit

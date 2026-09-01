@@ -131,7 +131,7 @@ run_training_round() {
     echo "Round $ROUND completed in $TIMETAKEN minutes."
 }
 
-R=6
+R=1
 EXCLUDE_KEYWORDS=""   # set to "" to disable
 GEO_OPT_RUN="True"    # set to True if you want to run geometry optimizations
 SKIP_NEB="False"      # set NEB to True if you want to skip NEB calculations
