@@ -96,48 +96,48 @@ The general idea of the program was for something that can be self contained on 
 
 ```
 mace_active_learning/
-├── analysis                      ##     
-│   ├── check_gpu_memory.py       #
-│   ├── check_neb_index.py        #
-│   ├── compare_cp2k.py           #
-│   ├── compare_models.py         #
-│   ├── list_xyz_name.py          #
-│   ├── neb_model_compare.py      #
-│   ├── plotloss.py               #
-│   └── plot_parity.py            #
-├── config.local.example.sh       #
-├── configs                       ##
-│   ├── configs.csv               #
-│   ├── constants.py              #
-│   ├── E0s.json                  #
-│   ├── neb_model_compare_config.py #
-│   ├── README.md                 #
-│   └── round_configs             ##
-│       ├── round6_active_pipeline.py #
-│       ├── round6_check_residual.py  #
-│       ├── round6_neb_geo_run.py     #
-│       └── schema.py                 #
-├── helpers                           ##
-│   ├── database_extractor.py         #
-│   ├── hugface_database.py           #
-│   └── recalculate_val.py            #
-├── hpc                               ##
+├── analysis                      ##   Files for post processing  
+│   ├── check_gpu_memory.py       
+│   ├── check_neb_index.py        
+│   ├── compare_cp2k.py           
+│   ├── compare_models.py         
+│   ├── list_xyz_name.py          
+│   ├── neb_model_compare.py      
+│   ├── plotloss.py               
+│   └── plot_parity.py            
+├── config.local.example.sh       ## A config for bash scripts
+├── configs                       ## Files for setting up the python scripts
+│   ├── configs.csv               
+│   ├── constants.py              
+│   ├── E0s.json                  
+│   ├── neb_model_compare_config.py 
+│   ├── README.md                 
+│   └── round_configs             
+│       ├── round1_active_pipeline.py 
+│       ├── round1_check_residual.py  
+│       ├── round1_neb_geo_run.py     
+│       └── schema.py                 
+├── helpers                           ## Helper functions
+│   ├── database_extractor.py         
+│   ├── hugface_database.py           
+│   └── recalculate_val.py            
+├── hpc                               ## Future project
 │   └── singularity                   ##[#3](https://github.com/MadChemLad-12/mace_active_learning/issues/3)
-│       ├── fugaku_submit.sh          #
-│       ├── mace_pipeline.def         #
-│       └── run_pipeline_hpc.sh       #
+│       ├── fugaku_submit.sh          
+│       ├── mace_pipeline.def         
+│       └── run_pipeline_hpc.sh       
 ├── LICENSE
 ├── README.md
-├── run_pipeline.sh                 #
-├── src                             ##
-│   ├── active_pipeline.py          #
-│   ├── check_residuals.py          #
-│   ├── neb_geo_run.py              #
-│   ├── oom_preflight.py            #
-│   ├── pipeline_audit.py           #
-│   └── pool_coverage.py            #
-├── structures                      ##
-└── train_active_learning.sh        #
+├── run_pipeline.sh                 # Bash script that runs the entire pipeline
+├── src                             ## Main driving files
+│   ├── active_pipeline.py          
+│   ├── check_residuals.py          
+│   ├── neb_geo_run.py              
+│   ├── oom_preflight.py            
+│   ├── pipeline_audit.py           
+│   └── pool_coverage.py            
+├── structures                      ## A location to store *xyz, *cif, etc file. Can be stored anywhere though
+└── train_active_learning.sh        # Main script to train MACE using multiheads
 
 ```
 
