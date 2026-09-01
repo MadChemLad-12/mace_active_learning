@@ -2,7 +2,9 @@
 
 An automated active learning workflow for fine-tuning [MACE](https://github.com/ACEsuit/mace) machine-learning interatomic potentials using CP2K single-point DFT calculations.
 
-The pipeline generates training data by running geometry optimisations and NEB (Nudged Elastic Band) calculations with MACE, selects the most uncertain/diverse frames via FPS, submits them to CP2K for DFT reference data, and retrains the model. Each iteration of this loop is called a **round**.
+The pipeline generates training data by running geometry optimisations, AIMD and NEB (Nudged Elastic Band) calculations with a given MACE foundational model, selects the most uncertain/diverse frames via FPS, submits them to CP2K for DFT reference data, and retrains the model. Each iteration of this loop is called a **round**.
+
+The general idea of the program was for something that can be self contained on a local PC or run on a HPC system. 
 
 ---
 
@@ -39,12 +41,12 @@ The pipeline generates training data by running geometry optimisations and NEB (
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        run_pipeline.sh                              │
-│  (orchestrates all steps; edit the round config block at the top)   │
+│ (orchestrates all steps; edit the round config block at the bottom) │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
        ┌───────────────────────▼──────────────────────────┐
        │  Step 1: neb_geo_run.py                           │
-       │  GeoOpt + NEB + optional AIMD sampling          │
+       │  GeoOpt + NEB +  AIMD sampling                    │
        │  → geo_opt_results/al_candidates/*.extxyz         │
        └───────────────────────┬──────────────────────────┘
                                │
@@ -62,9 +64,9 @@ The pipeline generates training data by running geometry optimisations and NEB (
        └───────────────────────┬──────────────────────────┘
                                │
        ┌───────────────────────▼──────────────────────────┐
-       │  Step 4: active_pipeline.py --parse-all           │
-       │  Parse energies + forces from CP2K outputs        │
-       │  → master_train_pool.xyz (growing dataset)        │
+       │  Step 4: active_pipeline.py --parse-all            │
+       │  Parse energies + forces + stress from CP2K outputs│
+       │  → master_train_pool.xyz (growing dataset)         │
        └───────────────────────┬──────────────────────────┘
                                │
        ┌───────────────────────▼──────────────────────────┐
@@ -94,25 +96,49 @@ The pipeline generates training data by running geometry optimisations and NEB (
 
 ```
 mace_active_learning/
-│
-├── run_pipeline.sh             # Master orchestration script — start here
-├── train_active_learning.sh    # MACE training script (edit hyperparameters here)
-│
-├── neb_geo_run.py              # Geometry optimisation, NEB, AIMD sampling
-├── active_pipeline.py          # Frame selection, CP2K input writing, DFT parsing
-├── check_residuals.py          # Dataset quality filter
-├── compare_models.py           # Model comparison and validation plots
-├── plotloss.py                 # Training loss/RMSE curves from log file
-├── pool_coverage.py            # Candidate pool coverage diagnostic
-├── check_gpu_memory.py         # GPU memory profiling utility
-├── check_neb_index.py          # To make sure the neb pathways are logical
-│
-├── configs.csv                 # YOUR SYSTEM DEFINITIONS — edit this
-├── E0s.json                    # Isolated-atom DFT reference energies (eV)
-│
-├── mace_env.yaml               # Conda environment (full pinned spec)
-├── pip_requirements.txt        # pip-only packages (use with conda base)
-└── README.md
+├── analysis                      ##     
+│   ├── check_gpu_memory.py       #
+│   ├── check_neb_index.py        #
+│   ├── compare_cp2k.py           #
+│   ├── compare_models.py         #
+│   ├── list_xyz_name.py          #
+│   ├── neb_model_compare.py      #
+│   ├── plotloss.py               #
+│   └── plot_parity.py            #
+├── config.local.example.sh       #
+├── configs                       ##
+│   ├── configs.csv               #
+│   ├── constants.py              #
+│   ├── E0s.json                  #
+│   ├── neb_model_compare_config.py #
+│   ├── README.md                 #
+│   └── round_configs             ##
+│       ├── round6_active_pipeline.py #
+│       ├── round6_check_residual.py  #
+│       ├── round6_neb_geo_run.py     #
+│       └── schema.py                 #
+├── helpers                           ##
+│   ├── database_extractor.py         #
+│   ├── hugface_database.py           #
+│   └── recalculate_val.py            #
+├── hpc                               ##
+│   └── singularity                   ##[#3](https://github.com/MadChemLad-12/mace_active_learning/issues/3)
+│       ├── fugaku_submit.sh          #
+│       ├── mace_pipeline.def         #
+│       └── run_pipeline_hpc.sh       #
+├── LICENSE
+├── README.md
+├── run_pipeline.sh                 #
+├── src                             ##
+│   ├── active_pipeline.py          #
+│   ├── check_residuals.py          #
+│   ├── neb_geo_run.py              #
+│   ├── oom_preflight.py            #
+│   ├── pipeline_audit.py           #
+│   └── pool_coverage.py            #
+├── structures                      ##
+└── train_active_learning.sh        #
+
 ```
 
 ---
@@ -121,10 +147,10 @@ mace_active_learning/
 
 ### Prerequisites
 
-- Linux with a CUDA-capable GPU (tested on CUDA 13)
+- Linux with a CUDA-capable GPU (tested on CUDA 13 on a Fedora Linux system)
 - [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or Mamba
-- CP2K compiled with `cp2k.ssmp` available on `$PATH`
-- A MACE foundation model (e.g. `mace-mp-0b3-medium-float32.model` from [MACE-MP](https://github.com/ACEsuit/mace-mp))
+- CP2K compiled with `cp2k.ssmp` (tested using CP2K through conda) available on `$PATH`
+- A MACE foundation model (e.g. `mace-mp-0b3-medium-float32.model` from [MACE-MP](https://github.com/ACEsuit/mace-mp) was used in testing)
 
 ### 1. Clone the repository
 
@@ -153,6 +179,8 @@ pip install -r pip_requirements.txt
 
 Add the following to your `~/.bashrc` (or equivalent):
 You can quickly do this using source config.local.sh
+config.local.sh is a way to quickly set up the program for many enviroments at once
+You would use a differnt config.local.sh for each system you want the program to run
 
 Or manually through below
 
@@ -163,6 +191,7 @@ export CP2K_LIBDIR="/path/to/cp2k/data"
 # (Optional) Override the default foundation model path
 export MACE_FOUNDATION_MODEL="/path/to/mace-mp-0b3-medium-float32.model"
 ```
+# Follow the config.local.sh file for all the paths
 
 ### 4. Download a foundation model
 
@@ -170,6 +199,7 @@ export MACE_FOUNDATION_MODEL="/path/to/mace-mp-0b3-medium-float32.model"
 # From the MACE-MP project — choose float32 for training stability
 wget https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b3/mace-mp-0b3-medium.model
 ```
+For our inital use on a small GPU system, we used the float32 and medium sized 0b3 model.
 Converting to float32 is not necessary but reduces the size on disk.
 
 ---
@@ -180,19 +210,22 @@ Converting to float32 is not necessary but reduces the size on disk.
 # 1. Edit configs.csv to point to your initial and final structures
 #    (See "Step 0" below for format details)
 
-# 2. Edit the "USER CONFIGURATION" block at the top of active_pipeline.py
+# 2. Edit the "configs/", "config/round_configs", and "config.local.sh" files
 #    Set your element list, KIND_PARAMS, DEFAULT_CELLS, and etc
 
 # 3. Edit E0s.json with your isolated-atom CP2K energies
 #    (or let the pipeline generate them automatically on Round 1)
+#    I would recommend doing them manually as they are simple and quick calculations to perform
 
-# 4. Edit check_residual.py — set for you ideal force and energy ranges to prevent unphysical structures for training
+# 4. Set up your round_config/ parameters for your specific round
+#    The "schema.py" file will hold the round of a given round that should reflect the number of "round*_active_pipeline.py"
+#    I create new files for each round to keep track of what I have changed
 
-# 5. Edit train_active_learning.sh for your MACE training parameters
+# 5. Edit config.local.sh for your MACE training parameters
 
-# 6. Edit run_pipeline.sh for your prefered settings
+# 6. Submit bash run_pipeline.sh to produce your mace model
 
-bash run_pipeline.sh 2>&1 | tee pipeline_1.log
+bash run_pipeline.sh
 ```
 
 ---
@@ -242,11 +275,13 @@ Reads `configs.csv` and for each system:
 | `AIMD_TARGET` | `initial` | Picks the csv structure to run the AIMD simulation |
 | `FIX_BY_HEIGHT` | `False` | Fix atoms below `FIX_HEIGHT_THRESHOLD` |
 
+# There are more values but these are the most important
+# See the NebGeoRunConfig() class in "schema" or "round1_neb_geo_run" for more details
 ---
 
 ### Step 2 — Frame selection and CP2K inputs
 
-**Script:** `active_pipeline.py` (no flags)  
+**Script:** `active_pipeline.py` (for flags see round1_active_pipeline.py)
 **Called by:** `run_pipeline.sh` when `PIPELINE_RUN="True"`
 
 1. Loads all `.extxyz` files from `geo_opt_results/al_candidates/`.
@@ -263,7 +298,8 @@ Reads `configs.csv` and for each system:
 ```python
 # ── Elements ──────────────────────────────────────────────────────────
 # Will attempt to read from E0s.json file
-
+# Make sure your E0s.json are written well as they will be used to 
+# Identify what elements are present in the code
 # ── CP2K KIND parameters per element ──────────────────────────────────
 KIND_PARAMS = {
     "H":  ("TZV2P-MOLOPT-GTH",        "GTH-PBE-q1"),
@@ -300,7 +336,8 @@ After Step 2, run the generated submission script. How you do this depends on yo
 ```bash
 bash cp2k_sp_round1/submit_missing.sh
 ```
-
+Comes with a built in memory watch dog and timeout for long jobs
+Ideally jobs should be small within reason
 ```
 Failed jobs are logged to `cp2k_sp_round{N}/failed_jobs.txt`. After fixing/rerunning them:
 
@@ -334,7 +371,7 @@ Filters `master_train_pool.xyz` for:
 
 Outputs: `training_clean.xyz` (pass) and `training_bad.xyz` (fail).
 
-NOTE: You may need to edit these values manually to ensure they are right for your system
+NOTE: You may need to edit the "round*_check_residual.py" values manually to ensure they are right for your system
 ---
 
 ### Step 6 — Retrain MACE
@@ -358,6 +395,8 @@ Key parameters to set:
 | `SWA_START` | When to switch to SWA/Stage-2 loss (typically ~75% of `MAX_EPOCHS`) |
 | `BATCH_SIZE` | Reduce if you hit OOM errors; increase if GPU is underutilised |
 | `NUM_SAMPLES_PT` | Materials Project frames for multi-head training (prevents catastrophic forgetting) |
+
+For all the variables see config.local.sh
 
 The script runs four sub-steps automatically:
 1. Pre-flight checks (files exist, GPU visible)
@@ -402,6 +441,7 @@ SKIP_AIMD="TRUE"             # Skip AIMD?
 PIPELINE_RUN="True"          # Run active_pipeline.py (frame selection)?
 CP2K_RUN="True"              # Run CP2K jobs?
 RUNS="150"                   # N_SELECT_TOTAL passed to active_pipeline.py (number of cp2k jobs)
+pre_flight="True"     # set to True if you want to run the OOM pre-flight check before training
 COMPARE_MODELS="True"        # Run compare_models.py after training?
 FOUNDATION="mace-mp-0b3-medium-float32.model"
 TRAINING_PATH="training_clean.xyz"
@@ -409,6 +449,7 @@ EXCLUDE_KEYWORDS=""          # system_type keywords to drop, e.g. "DRY WET" Thes
 ```
 
 ---
+### Variables and scripts
 
 ### `neb_geo_run.py` — geometry and NEB settings
 
@@ -502,7 +543,7 @@ The slab-burial check in `active_pipeline.py` and `check_residuals.py` is parame
 ---
 
 ## Utility Scripts
-
+## /analysis
 ### `check_gpu_memory.py`
 
 Profiles GPU memory usage by running MACE on structures sorted by cell volume. Run this before starting a round to find the maximum structure size your GPU can handle, then set `MAX_CELL_VOLUME` accordingly.
@@ -520,6 +561,116 @@ This is to check before running neb_geo_run.py
 python check_neb_index.py
 ```
 
+### `compare_cp2k.py`
+
+Parses CP2K IT-NEB/CI-NEB output and compares the energy profile
+and per-image forces against a MACE MLP model.
+
+```bash
+python parse_neb_compare_mace.py \
+        --cp2k_out Close0.75PtO2neb.out \
+        --replica_dir . \
+        --mace_model /path/to/mace_model.model \
+        --n_replicas 10
+```
+
+### `list_xyz_name.py`
+
+Standalone utility to scan an extended-XYZ (.xyz/.extxyz) trajectory file
+and list the unique `system_type=` names found in each frame's header line,
+sorted alphabetically (or filtered down to names matching given keywords).
+
+```bash
+python list_xyz_name.py path/to/file.xyz
+python list_xyz_name.py path/to/file.xyz --keywords dry close
+python list_xyz_name.py path/to/file.xyz --keywords retry --case-sensitive
+```
+
+### `neb_model_compare.py`
+
+Run NEB simulations for Pt dissolution pathways (Pt, PtO, PtOH, PtO2,
+  PtOH2) on solvated Pt(111) at varying O coverages using TWO MACE models
+  simultaneously — a foundational model and a fine-tuned model — and compare
+  their outputs systematically.
+
+```bash
+python neb_model_compare.py [--csv PATH] [--validate-only] [--no-neb]
+
+```
+
+### `plotloss.py`
+
+Parses the multi-head MACE training log and produces figures for each head:
+  1. loss_curve_{head}.png     -- loss value vs epoch (Stage 1 and Stage 2)
+  2. rmse_curve_{head}.png     -- RMSE_F and RMSE_E vs epoch
+
+```bash
+python plotloss.py --log mace_train.log --out my_figures/
+
+```
+
+## /helpers
+
+### `convert_model.py`
+
+converts a mace model to float32 type
+
+```bash
+python convert_model.py 'path-to-mace'
+
+```
+
+### `database_extractor.py`
+
+Select the most valuable frames from a candidate database to add to
+master_train.xyz, using:
+
+  1) Descriptor-based farthest-point sampling (FPS) for structural diversity
+     relative to what's already in master_train.xyz.
+  2) (Optional) Committee disagreement across multiple trained MACE models
+     to rank by predictive uncertainty.
+
+```bash
+python select_frames.py --database candidates.xyz --master master_train.xyz \
+    --n-select 200 --no-committee
+
+```
+
+### `hugface_database.py`
+
+Given a specific elemental value, number of structures and the average structure value to accept, will extract structures of value from a given public data set.
+The example uses MPtrj and OC25 and builds a 1000 structure data set of specifically structures of chemical interest. 
+
+
+```bash
+python hugface_database.py
+    
+```
+
+### `recalculate_val.py`
+
+Recalculates DFT single points for a validation xyz using the production
+CP2K setup from active_pipeline.py. Results are written to a new XYZ
+and NEVER added to the training pool.
+
+```bash
+    # Step 1 — write inputs and generate submit script
+    python recalculate_validation.py --write
+
+    # Step 2 — run CP2K (on HPC: edit VAL/submit_all.sh first)
+    bash VAL/submit_all.sh
+
+    # Step 3 — parse outputs to XYZ
+    python recalculate_validation.py --parse
+
+    # Or all steps locally (only if CP2K is available on this machine)
+    python recalculate_validation.py --all    
+```
+## /hpc/singularity
+# In the works
+
+## /src
+
 ### `pool_coverage.py`
 
 Shows what fraction of your candidate pool (from `neb_geo_run.py`) has already been computed by CP2K, broken down by system type. Helps you decide whether to rerun `neb_geo_run.py` with the new model or continue selecting from the existing pool.
@@ -528,15 +679,21 @@ Shows what fraction of your candidate pool (from `neb_geo_run.py`) has already b
 python pool_coverage.py
 ```
 
-### `plotloss.py`
+### `pipeline_audit.py
+`
 
-Parses the MACE training log and generates RMSE and loss curves. Works with multi-head training logs; use `--head` to target a specific head.
+Tracks raw structures or multi-frame NEB pathways through the entire MACE AL 
+pipeline to identify precisely where structures fell off or were skipped.
 
 ```bash
-python plotloss.py --log pipeline_1.log --head Default --out plots/
-```
-
----
+  # Standard Tracking Audit
+  python pipeline_audit.py --audit geo_opt_results/Chair4x4sat_sol_initial_opt.cif
+  
+  # Force-Parse finished CP2K outputs directly into the master pool
+  python pipeline_audit.py --add-master cp2k_sp_round4/sp_Dry0.375PtOH_r4_0004.out
+  
+  # Force-Parse finished CP2K outputs directly into the clean training pool
+  python pipeline_audit.py --add-clean cp2k_sp_round4/sp_Dry0.375PtOH_r4_0015.out```
 
 ## Troubleshooting
 
@@ -596,6 +753,8 @@ this code, please also cite the relevant sources below depending on which compon
 > *Advances in Neural Information Processing Systems*, 35.
 > https://github.com/ACEsuit/mace
 
+# Useful Databases
+
 **OC25**
 > Sahoo, S. J., Maraschin, M., Levine, D. S., Ulissi, Z., Zitnick, C. L., Varley, J. B., Gauthier, J. A., 
 > Govindarajan, N., & Shuaibi, M. (2025). The Open Catalyst 2025 (OC25) Dataset and Models for 
@@ -613,6 +772,8 @@ this code, please also cite the relevant sources below depending on which compon
 > materials science with the Materials Project. *Nature Materials*, 24, 1522–1532. 
 > https://www.nature.com/articles/s41563-025-02272-0
 
+# Useful Programs
+
 **Nudged Elastic Band (NEB)**
 > Henkelman, G., Uberuaga, B. P., & Jónsson, H. (2000). A climbing image nudged elastic band 
 > method for finding saddle points and minimum energy paths. *The Journal of Chemical Physics*, 113(22), 9901–9904.
@@ -623,4 +784,9 @@ this code, please also cite the relevant sources below depending on which compon
 **ASE (Atomic Simulation Environment)**
 > Larsen, A. H., et al. (2017). The atomic simulation environment—a Python library for working 
 > with atoms. *Journal of Physics: Condensed Matter*, 29(27), 273002.
-> https://wiki.fysik.dtu.dk/ase/
+> DOI 10.1088/1361-648X/aa680e
+
+**REICO Sampling**
+> Yang, C., et al. (2024). Developing General Reactive Element-Based Machine Learning Potentials as the Main Computational Engine for Heterogeneous Catalysis.
+> *ChemRxiv*.
+> https://doi.org/10.26434/chemrxiv-2024-r8l6j
