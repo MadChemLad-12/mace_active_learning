@@ -421,6 +421,7 @@ python compare_models.py --test held_out.xyz --outdir comparison_results/  --mod
 # Plot training curves
 python plotloss.py --log pipeline_1.log --head Default --out comparison_results/
 ```
+Please be mindful as the D3 correctional can introduce a bias that prevents the results from being accurate
 
 `compare_models.py` handles the E0 reference energy shift automatically — it extracts the E0s each model was trained with from the checkpoint, so foundation models (trained with Materials Project E0s) and your fine-tuned models (trained with CP2K E0s) are compared fairly.
 

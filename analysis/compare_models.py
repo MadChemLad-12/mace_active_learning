@@ -40,6 +40,7 @@ import sys
 import argparse
 import numpy as np
 import matplotlib
+import importlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -49,8 +50,22 @@ from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
+from configs.round_configs.schema import ActivePipelineConfig
 from configs.constants import HELD_OUT, E0_JSON, CLEAN_TRAIN, BAD_TRAIN, HELD_OUT, MASTER_TRAIN
-from configs.round_configs.round6_check_residual import CONFIG
+
+ROUND = ActivePipelineConfig.round
+def load_residual_config(ROUND: int) -> ActivePipelineConfig:
+    if ROUND != int(ROUND):
+        raise ValueError(
+            f"Round '{ROUND}' is not supported. Please use round=1 for the initial check."
+        )
+
+    config_module = importlib.import_module(
+        f"configs.round_configs.round{ROUND}_active_pipeline"
+    )
+    return config_module.CONFIG, config_module.CONFIG.apply_d3, config_module.get_coh_bounds
+
+CONFIG, APPLY_D3, get_coh_bounds = load_residual_config(ROUND)
 
 # ==============================================================================
 # Configuration
@@ -59,7 +74,7 @@ from configs.round_configs.round6_check_residual import CONFIG
 DEFAULT_TEST_SET = HELD_OUT
 DEFAULT_OUTPUT   = "comparison_results"
 MAX_FORCE_THRESHOLD = 50.0
-APPLY_D3 = CONFIG.apply_d3 # Whether to include D3 in all calculations (MACE + D3) for this round. If False, only MACE is used.
+APPLY_D3 = False # Whether to include D3 in all calculations (MACE + D3) for this round. If False, only MACE is used.
 COLORS = ["#6c757d", "#2196F3", "#4CAF50", "#FF9800",
           "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
 
@@ -104,13 +119,19 @@ def frame_e0s_shift(atoms, e0s: dict) -> float:
     if not e0s:
         return 0.0
     from collections import Counter
+    from ase.data import chemical_symbols
+    norm_e0s = {
+        (chemical_symbols[k] if isinstance(k, int) else k): v
+        for k, v in e0s.items()
+    }
+    
     counts = Counter(atoms.get_chemical_symbols())
-    missing = [el for el in counts if el not in e0s]
+    missing = [el for el in counts if el not in norm_e0s]
     if missing:
-        raise ValueError(f"Elements {missing} not in E0s dict {list(e0s.keys())}")
-    return sum(n * e0s[el] for el, n in counts.items())
+        raise ValueError(f"Elements {missing} not in E0s dict {list(norm_e0s.keys())}")
+    return sum(n * norm_e0s[el] for el, n in counts.items())
  
-def extract_model_e0s(model_path: str) -> dict:
+def extract_model_e0s(model_path: str, head_name: str = "Default") -> dict:
     """
     Read the per-element atomic reference energies stored inside a MACE
     checkpoint.  MACE bakes these in at training time regardless of whether
@@ -124,33 +145,42 @@ def extract_model_e0s(model_path: str) -> dict:
         from ase.data import chemical_symbols
  
         ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
- 
-        # MACE saves either the model object directly or a state-dict wrapper
+
         if hasattr(ckpt, "atomic_energies_fn"):
-            ae     = ckpt.atomic_energies_fn.atomic_energies.detach().cpu().tolist()
+            ae_t   = ckpt.atomic_energies_fn.atomic_energies.detach().cpu()
             z_list = ckpt.atomic_numbers.detach().cpu().tolist()
+
+            if ae_t.dim() == 2:
+                heads = getattr(ckpt, "heads", None)
+                if heads and head_name in heads:
+                    head_idx = heads.index(head_name)
+                else:
+                    print(f"    [!] head '{head_name}' not found in heads={heads}; "
+                          f"falling back to last head")
+                    head_idx = -1
+                ae_t = ae_t[head_idx]
+
+            ae = ae_t.tolist()
+            
         elif isinstance(ckpt, dict):
-            sd = (ckpt.get("model")
-                  or ckpt.get("model_state_dict")
-                  or ckpt.get("state_dict")
-                  or ckpt)
-            ae_key = next(
-                (k for k in sd if "atomic_energies" in k and "fn" not in k), None
-            )
+            # (unchanged dict-based fallback path)
+            sd = (ckpt.get("model") or ckpt.get("model_state_dict")
+                  or ckpt.get("state_dict") or ckpt)
+            ae_key = next((k for k in sd if "atomic_energies" in k and "fn" not in k), None)
             if ae_key is None:
                 return {}
             ae_tensor = sd[ae_key]
             ae = ae_tensor.detach().cpu().tolist() if hasattr(ae_tensor, "detach") else list(ae_tensor)
-            zt     = ckpt.get("z_table") or sd.get("z_table") or {}
+            zt = ckpt.get("z_table") or sd.get("z_table") or {}
             z_list = zt.get("zs", []) if isinstance(zt, dict) else getattr(zt, "zs", [])
         else:
             return {}
- 
+
         if not z_list or len(z_list) != len(ae):
             return {}
- 
+
         return {chemical_symbols[int(z)]: float(e) for z, e in zip(z_list, ae)}
- 
+
     except Exception as exc:
         print(f"    [!] Could not extract E0s from {Path(model_path).name}: {exc}")
         return {}
@@ -180,7 +210,8 @@ def evaluate_model(model_path, test_frames, device="cuda", dtype="float32",
     calc_mace = MACECalculator(
         model_paths=model_path,
         device=device,
-        default_dtype=dtype
+        default_dtype=dtype,
+        head = "Default"
     )
     if APPLY_D3:
         print(f"[→] Including D3 in calculations (MACE + D3)")
@@ -250,16 +281,13 @@ def evaluate_per_system(results):
     
     # Unpack pre-calculated values
     for pe, re, pf_chunk, rf_chunk, sys_name in zip(
-        results["pred_energies"], 
-        results["ref_energies"], 
-        # Chunk flattened forces back by atom count per frame
+        results["pred_energies"], results["ref_energies"],
         np.array_split(results["pred_forces"], len(results["pred_energies"])),
         np.array_split(results["ref_forces"], len(results["ref_energies"])),
         results["system_types"]
     ):
         if sys_name not in by_system:
             by_system[sys_name] = {"pe": [], "re": [], "pf": [], "rf": []}
-            
         by_system[sys_name]["pe"].append(pe)
         by_system[sys_name]["re"].append(re)
         by_system[sys_name]["pf"].extend(pf_chunk.tolist())
@@ -271,6 +299,7 @@ def evaluate_per_system(results):
         pf, rf = np.array(d["pf"]), np.array(d["rf"])
         metrics[sys_name] = {
             "energy_rmse_meV_atom": float(np.sqrt(np.mean((pe - re) ** 2))) * 1000,
+            "energy_bias_meV_atom": float(np.mean(pe - re)) * 1000,
             "force_rmse_meV_A":     float(np.sqrt(np.mean((pf - rf) ** 2))) * 1000,
             "n_frames": len(pe),
         }
@@ -716,6 +745,8 @@ def main():
         )
         metrics = compute_metrics(results)
         per_system = evaluate_per_system(results)
+        bias = float(np.mean(results["pred_energies"] - results["ref_energies"])) * 1000
+        print(f"  [diag] mean signed bias: {bias:+.2f} meV/atom  (vs RMSE {metrics['energy_rmse_meV_atom']:.2f})")
 
         all_metrics.append(metrics)
         all_per_system.append(per_system)
