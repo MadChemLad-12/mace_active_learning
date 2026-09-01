@@ -13,11 +13,11 @@ from typing import Dict, List
 @dataclass
 class ActivePipelineConfig:
     # --- General ---
-    round: int = 6                     # overridden by args.target if provided
+    round: int = 1                     # overridden by args.target if provided
     n_select_total: int = 300          # overridden by args.runs
     max_atoms: int = 580               # cap to avoid oversized GPU jobs
     reuse_existing_cp2k: bool = True   # skip inputs for frames w/ valid CP2K output
-    exclude_system_keywords: List[str] = field(default_factory=list)
+    exclude_system_keywords: List[str] = field(default_factory=list) # Example exclude_system_keywords: List[str] = field(default_factory=lambda: ["nafion"])
 
     # --- MACE ---
     device: str = "cuda"
@@ -45,7 +45,7 @@ class ActivePipelineConfig:
 
     # --- REICO (random imaginary-chemical box) sampling ---
     reico_sampling: bool = True
-    reico_num: int = 50                # random boxes generated per round
+    reico_num: int = 1                # random boxes generated per round
     reico_min_atoms: int = 20
     reico_max_atoms: int = 60
     reico_vol_per_atom: float = 12.0   # Å³/atom, condensed-phase packing density

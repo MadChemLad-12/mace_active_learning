@@ -14,13 +14,26 @@ from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 import json
+import importlib
 ### CONSTANTS
-import sys
-root_dir = Path(__file__).resolve().parent.parent
-if str(root_dir) not in sys.path:
-    sys.path.insert(0, str(root_dir))
-from configs.round_configs.round6_check_residual import CONFIG, get_residual_bounds, get_force_bounds
-from configs.constants import EXTERNAL_SYSTEM_TYPES, E0_JSON, FOUNDATION_MODEL_PATH, MASTER_TRAIN, CLEAN_TRAIN, BAD_TRAIN
+from configs.constants import E0_JSON, FOUNDATION_MODEL_PATH, MASTER_TRAIN, CLEAN_TRAIN, BAD_TRAIN, EXTERNAL_SYSTEM_TYPES
+from configs.round_configs.schema import ActivePipelineConfig
+from configs.round_configs.round1_check_residual import CheckResidualConfig  
+ROUND = ActivePipelineConfig.round
+
+def load_residual_config(ROUND: int) -> tuple[CheckResidualConfig, callable, callable]:
+    if ROUND != 1:
+        raise ValueError(
+            f"Round '{ROUND}' is not supported. Please use round=1 for the initial check."
+        )
+
+    config_module = importlib.import_module(
+        f"configs.round_configs.round{ROUND}_check_residual"
+    )
+    config = config_module.CONFIG
+    return config, config.get_residual_bounds, config.get_force_bounds
+
+CONFIG, get_residual_bounds, get_force_bounds = load_residual_config(ROUND)
 
 MAX_FORCE_REF = CONFIG.max_force_ref   # eV/Å
 MAX_RMSE      = CONFIG.max_rmse    # meV/Å

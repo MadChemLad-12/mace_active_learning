@@ -91,7 +91,7 @@ def apply_round(n: int, custom_model_path: str = None):
     elif ROUND > 3:
         MODEL_PATH = f"mace_V{ROUND-1}_active_learning_stagetwo.model"
     else:
-        MODEL_PATH = _FOUNDATION_MODEL
+        MODEL_PATH = FOUNDATION_MODEL_PATH
 
     CP2K_DIR = f"cp2k_sp_round{n}"
     FAILED_LOG = f"cp2k_sp_round{n}/failed_jobs.txt"
@@ -206,7 +206,7 @@ def fps_sample_md_trajectory(frames, n_select, system_name):
 def _is_excluded(system_type: str, config: ActivePipelineConfig) -> bool:
     """Return True if system_type matches any exclusion keyword (case-insensitive)."""
     s = system_type.lower()
-    return any(kw.lower() in s for kw in config.EXCLUDE_SYSTEM_KEYWORDS)
+    return any(kw.lower() in s for kw in config.exclude_system_keywords)
 
 def load_candidates(al_input_dir):
     """
@@ -233,7 +233,7 @@ def load_candidates(al_input_dir):
         for atoms in frames:
             if "system_type" not in atoms.info:
                 atoms.info["system_type"] = xyz_path.stem
-            if _is_excluded(atoms.info["system_type"]):
+            if _is_excluded(atoms.info["system_type"], config=CONFIG):
                 continue   # drop it early
             filtered.append(atoms)
 
@@ -319,6 +319,11 @@ CP2K_TEMPLATE = """\
 &GLOBAL
   PROJECT_NAME {name}
   RUN_TYPE ENERGY_FORCE
+  &DBCSR
+    USE_MPI_ALLOCATOR .FALSE.
+    MM_STACK_SIZE 1000
+    MAX_ELEMENTS_PER_BLOCK 32
+  &END DBCSR
   PRINT_LEVEL MEDIUM
   PREFERRED_FFT_LIBRARY FFTW3
   EXTENDED_FFT_LENGTHS .TRUE.
@@ -454,7 +459,7 @@ def _build_scf_block(atoms) -> str:
         return """\
     &SCF
       SCF_GUESS ATOMIC
-      MAX_SCF 100
+      MAX_SCF 150
       EPS_SCF 1.0E-6
       ADDED_MOS 0
       &OT ON
@@ -760,8 +765,8 @@ export OPENBLAS_NUM_THREADS=1
 total={len(jobs)}
 
 # --- memory guard settings ---
-MEM_LIMIT_KB=$(( 62 * 1024 * 1024 * 85 / 100 ))   # 85% of 62GB, in KB
-MEM_CHECK_INTERVAL=2                               # seconds between checks
+MEM_LIMIT_KB=$(( 62 * 1024 * 1024 * 90 / 100 ))   # 90% of 62GB, in KB
+MEM_CHECK_INTERVAL=10                               # seconds between checks
 FAILED_LOG={cp2k_dir}/failed_jobs.txt
 TIMES_LOG={cp2k_dir}/job_times.log
 
@@ -920,7 +925,7 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, config: ActivePipelineConfig,
         
         # Exact-match filter: skip this specific structure if it already
         # failed before (same sys_type + same index in this round).
-        if ignore_names and name in ignore_names:
+        if ignore_names and any(kw in name for kw in ignore_names):
             skipped_ignored += 1
             print(f"  [⊘] {name}: matches failed_jobs.txt — skipped as submit_missing.sh candidate")
             continue
@@ -962,7 +967,7 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, config: ActivePipelineConfig,
 
     # Persist updated index
     if config.reuse_existing_cp2k:
-        _save_geometry_index(cp2k_dir, new_index)
+        _save_geometry_index(new_index)
 
     n_total   = len(all_jobs)
     n_skipped = reused_direct + reused_hash
@@ -1350,7 +1355,7 @@ def recover_and_prioritize_missing(target_round=None, n_runs=100, ignore_failed=
             atoms.info["system_type"] = f"retry_{original_sys}"
 
     # Hand off to your existing writer (it handles submit_missing.sh automatically!)
-    write_all_sp_inputs(prioritized_frames, CP2K_DIR)
+    write_all_sp_inputs(prioritized_frames, CP2K_DIR, config=CONFIG, ignore_names=CONFIG.exclude_system_keywords)
 
 def parse_cp2k_sp_results(cp2k_dir, selected_frames):
     """
@@ -1729,7 +1734,7 @@ def run_round(config: ActivePipelineConfig):
     """Load MACE candidate files, select uncertain frames, write CP2K inputs."""
     print(f"\n{'='*60}")
     print(f"  Active Learning Round {config.round}")
-    print(f"  Model: {_FOUNDATION_MODEL}")
+    print(f"  Model: {FOUNDATION_MODEL_PATH}")
     print(f"{'='*60}\n")
     skipped_unphysical = 0
 
@@ -1737,7 +1742,7 @@ def run_round(config: ActivePipelineConfig):
     all_candidates = load_candidates(AL_INPUT_DIR)
 
     print(f"\n[→] Re-scoring {len(all_candidates)} NEB/GeoOpt frames with MACE...")
-    all_candidates = rescore_with_mace(all_candidates, _FOUNDATION_MODEL, config)
+    all_candidates = rescore_with_mace(all_candidates, FOUNDATION_MODEL_PATH, config)
 
     geom_index = _load_geometry_index(CP2K_DIR) if config.reuse_existing_cp2k else {}
 
@@ -1771,7 +1776,7 @@ def run_round(config: ActivePipelineConfig):
     n_select_total = config.n_select_total
     print(f"\n[→] Selecting up to {n_select_total} frames that need CP2K...")
 
-    calc_mace = MACECalculator(model_paths=_FOUNDATION_MODEL, device=config.device, default_dtype=config.dtype)
+    calc_mace = MACECalculator(model_paths=FOUNDATION_MODEL_PATH, device=config.device, default_dtype=config.dtype)
     if config.apply_d3:
         print(f"  [→] D3 dispersion correction will be applied to MACE scores.")
         calc_DFT = TorchDFTD3Calculator(
@@ -1863,7 +1868,7 @@ def run_round(config: ActivePipelineConfig):
             for _ in range(config.reico_num):
                 n_atoms = int(np.random.randint(config.reico_min_atoms, config.reico_max_atoms + 1))
                 try:
-                    box = create_random_box(unique_elements, n_atoms)
+                    box = create_random_box(unique_elements, n_atoms, config=CONFIG)
                 except ValueError as e:
                     n_failed += 1
                     print(f"    [!] REICO: {e}")
@@ -1900,7 +1905,7 @@ def run_round(config: ActivePipelineConfig):
         print(f"\n[→] {E0_JSON} not found. Generating E0 inputs for: {elements_needed}")
         e0_inputs = generate_e0s_input(sorted(elements_needed), config.e0_dir)
 
-    write_all_sp_inputs(selected, CP2K_DIR)
+    write_all_sp_inputs(selected, CP2K_DIR, config=CONFIG, ignore_names=CONFIG.exclude_system_keywords)
 
     selected_path = f"al_selected_round{config.round}.xyz"
     write(selected_path, selected, format="extxyz")
@@ -2317,7 +2322,7 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
                 parse_failed += 1
                 continue
             sys_type = m2.group(1)
-            if _is_excluded(sys_type):
+            if _is_excluded(sys_type, config=CONFIG):
                 n_excluded += 1
                 continue
             atoms.info["system_type"] = sys_type
@@ -2485,7 +2490,7 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
             "name":     stem,                                  
             "cp2k_dir": atoms.info.pop("_cp2k_dir", CP2K_DIR)  
         }
-    _save_geometry_index(CP2K_DIR, geom_index)
+    _save_geometry_index(geom_index)
     print(f"[✓] Global geometry index updated")
  
 def _write_outputs(new_frames, failed):
@@ -2544,7 +2549,7 @@ if __name__ == "__main__":
     parser.add_argument("--runs", type=int, default=None,
         help="Override CONFIG.n_select_total for this run")
     parser.add_argument("--model", type=str, default=None,
-        help="Override CONFIG.model_path for this run")
+        help="Override CONFIG.model for this run")
     parser.add_argument("--exclude", nargs="*", default=[], metavar="KEYWORD")
     args = parser.parse_args()
 
@@ -2574,7 +2579,7 @@ if __name__ == "__main__":
     if args.target != CONFIG.round:
         raise ValueError(f"Target round {args.target} does not match CONFIG.round {CONFIG.round}")
     
-    print(f"[→] Round {CONFIG.round}  |  Model: {args.model_path}  |  CP2K dir: {CONFIG.cp2k_dir}")
+    print(f"[→] Round {CONFIG.round}  |  Model: {args.model}  |  CP2K dir: {CP2K_DIR}")
     print("Starting execution for round context...\n")
 
     # -------------------------------------------------------------

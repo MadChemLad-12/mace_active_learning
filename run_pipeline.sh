@@ -91,7 +91,7 @@ run_training_round() {
     TRACK_PID=$!
     if [ "$pre_flight" = "True" ]; then
         echo "Running OOM pre-flight check..."
-        if python oom_preflight.py \
+        if python ${MACE_PATH}src/oom_preflight.py \
             --pool "$TRAINING_PATH" \
             --model "$FOUNDATION" \
             --batch_size 2 --max_count 700; then

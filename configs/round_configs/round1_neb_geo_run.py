@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 @dataclass
 class NebGeoRunConfig:
-    round: int = 6
+    round: int = 1
     # --- Device / precision ---
     device: str = "cuda"        # "cuda" or "cpu"
     dtype: str = "float32"      # must match your model's dtype
