@@ -36,6 +36,7 @@ HOW TO USE:
 import copy
 import csv
 import glob
+import re
 import json
 import os
 import time
@@ -65,7 +66,7 @@ from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 
 from patches import apply_dftd3_cell_patch
 from configs.round_configs.schema import NebGeoRunConfig
-from configs.constants import FOUNDATION_MODEL_PATH, FINETUNED_MODEL_PATH
+from configs.constants import FOUNDATION_MODEL_PATH, FINETUNED_MODEL_PATH, KIND_PARAMS, IONIC_SPECIES_CHARGE
 apply_dftd3_cell_patch()
 
 # ==============================================================================
@@ -130,11 +131,35 @@ with open(PATH_CSV, newline='') as csvfile:
         {
             "name":    row["Name"],
             "initial": row["initial"],
-            "final":   row["final"]
+            "final":   row["final"],
+            "charge":  row.get("charge", None),
+            "multiplicity": row.get("multiplicity", None),
+            "fragments": row.get("fragments", None)
         }
         for row in reader
     ]
+    
+def parse_fragments_field(raw: str | None) -> dict[str, int] | None:
+    """
+    Parses 'TFSI:5;FSI:5;BF4:5;PF6:5;PYR13:5' into {'TFSI':5, 'FSI':5, ...}.
+    Bare species with no ':' default to count=1 (e.g. single-ion case: 'BF4').
+    """
+    if not raw:
+        return None
+    fragments = {}
+    for entry in raw.split(";"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if ":" in entry:
+            species, count_str = entry.split(":", 1)
+            species, count = species.strip(), int(count_str.strip())
+        else:
+            species, count = entry, 1
+        fragments[species] = fragments.get(species, 0) + count
+    return fragments
 
+# Idea add SPIN and CHarge to the input config and assume neutral system
 # ==============================================================================
 # HELPER FUNCTIONS
 # ==============================================================================
@@ -172,6 +197,59 @@ def estimate_default_cell(atoms, padding=10.0):
 
     print(f"  [✓] Cell replaced: {atoms.get_cell()}")
     return atoms
+
+def extract_valence_electrons(potential_str: str) -> int:
+    """Extracts valence electron count (q-value) from GTH potential name (e.g. 'GTH-PBE-q18' -> 18)."""
+    match = re.search(r'-q(\d+)$', potential_str)
+    if match:
+        return int(match.group(1))
+    raise ValueError(f"Could not parse valence electrons from potential string: {potential_str}")
+
+def resolve_charge_multiplicity(row_charge, row_multiplicity, fragments, atoms):
+    """
+    row_charge / row_multiplicity: strings from the CSV, or None/"guess".
+    fragments: parsed list of species tags, or None.
+    Returns (charge:int, multiplicity:int), validated for parity consistency.
+    """
+    # --- Charge ---
+    if row_charge and row_charge.strip().lower() != "guess" and row_charge.strip() != "":
+        charge = int(row_charge)
+        print(f"  [→] Charge explicitly set from CSV: {charge}")
+    elif fragments:
+        missing = [f for f in fragments if f not in IONIC_SPECIES_CHARGE]
+        if missing:
+            raise KeyError(f"Unknown fragment species {missing}; add to IONIC_SPECIES_CHARGE.")
+        charge = sum(IONIC_SPECIES_CHARGE[species] * count for species, count in fragments.items())
+        print(f"  [→] Charge inferred from fragments: {charge} (from {fragments})")
+    else:
+        charge = 0
+
+    # --- Total valence electrons at this charge ---
+    total_valence = sum(
+        extract_valence_electrons(KIND_PARAMS[s][1])
+        for s in atoms.get_chemical_symbols()
+    )
+    n_electrons = total_valence - charge
+    parity_singlet_ok = (n_electrons % 2 == 0)
+
+    # --- Multiplicity ---
+    if row_multiplicity and row_multiplicity.strip().lower() != "guess" and row_multiplicity.strip() != "":
+        multiplicity = int(row_multiplicity)
+        print(f"  [→] Multiplicity explicitly set from CSV: {multiplicity}")
+    else:
+        multiplicity = 1 if parity_singlet_ok else 2  # forced doublet if odd-electron
+        print(f"  [→] Multiplicity inferred from electron count: {multiplicity}")
+    # --- Validation: multiplicity parity must match electron parity ---
+    # (multiplicity - 1) must have the same parity as n_electrons
+    if (multiplicity - 1) % 2 != n_electrons % 2:
+        raise ValueError(
+            f"Inconsistent spin state: charge={charge} gives {n_electrons} electrons "
+            f"(parity={'even' if parity_singlet_ok else 'odd'}), but multiplicity={multiplicity} "
+            f"requires {'even' if (multiplicity-1)%2==0 else 'odd'} electron count. "
+            f"Check the CSV row — this combination is not physically possible."
+        )
+
+    return charge, multiplicity
 
 def read_structure(path):
     """Read a structure and estimate a default cell if none is provided."""
@@ -620,7 +698,7 @@ def neb_workflow(init_atoms, final_atoms, calc, config: NebGeoRunConfig, name, u
 # GEO-OPT AL EXPORT HELPER
 # ==============================================================================
 
-def export_geoopt_for_al(name, init_atoms, final_atoms):
+def export_geoopt_for_al(name, init_atoms, final_atoms, charge, multiplicity, fragments):
     """
     Write a single .extxyz for active_pipeline.py containing the
     optimised initial + final frames, tagged with system_type.
@@ -631,6 +709,10 @@ def export_geoopt_for_al(name, init_atoms, final_atoms):
         at.info["system_type"] = name
         at.info["geoopt_label"] = label
         at.info["source"]       = "mace_geoopt"
+        at.info["charge"] = charge
+        at.info["multiplicity"] = multiplicity
+        if fragments:
+            at.info["fragments"] = ",".join(fragments)
         frames.append(at)
 
     al_path = os.path.join(AL_EXPORT_DIR, f"mace_geoopt_{name}.extxyz")

@@ -29,6 +29,13 @@ Z_MAP = {"H": 1, "Li": 3, "C": 6, "O": 8, "F": 9, "P": 15, "S": 16, "Pt": 78}
 # --- Elements treated as metals (affects e.g. slab-height triage logic) ---
 METALS = {"Pt", "Li"}  # extend if other transition metals are added later
 
+# --- Fragments of molecules that have specific charges ---
+IONIC_SPECIES_CHARGE = {
+    "BF4": -1, "TFSI": -1, "FSI": -1, "PF6": -1,
+    "PYR13": +1,
+    # extend as you add species
+}
+
 # --- Location of training files ---
 CLEAN_TRAIN  = "training_clean.xyz"
 BAD_TRAIN    = "training_bad.xyz"

@@ -1,4 +1,5 @@
-Name,initial,final
-Pt_atom,structures/Pt_atom.cif,
-SO3Pt111,structures/SO3Pt111.cif,structures/SO3Pt111.cif
-BF3,structures/BF3.cif
+Name,initial,final,charge,multiplicity,fragments
+Pt_atom,structures/Pt_atom.cif,,,,
+SO3Pt111,structures/SO3Pt111.cif,structures/SO3Pt111.cif,,,
+BF4,structures/BF4.cif,,-1,1,BF4
+Ionicliquid,structures/ionicliquid.cif,,guess,guess,"""TFSI:2;FSI:2;BF4:2;PF6:2;PYR1:2"""

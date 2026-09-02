@@ -343,6 +343,7 @@ CP2K_TEMPLATE = """\
       METHOD GPW
       EPS_DEFAULT 1.0E-12
     &END QS
+{charge_uks_block}    
 {scf_block}
     &XC
       &XC_FUNCTIONAL PBE
@@ -382,6 +383,41 @@ def extract_valence_electrons(potential_str: str) -> int:
     if match:
         return int(match.group(1))
     raise ValueError(f"Could not parse valence electrons from potential string: {potential_str}")
+
+
+def _resolve_dft_charge_state(atoms, name):
+    """
+    Pulls charge/multiplicity from atoms.info (written by the extxyz export step),
+    validates parity consistency, and returns (charge, multiplicity, uks).
+    Refuses to silently default charge on a system with no info at all — the
+    export step should always have written these keys; a genuine gap here is
+    a broken pipeline stage, not something to paper over with charge=0.
+    """
+    if "charge" not in atoms.info or "multiplicity" not in atoms.info:
+        raise KeyError(
+            f"{name}: atoms.info missing 'charge'/'multiplicity'. "
+            f"Expected these to be set by the extxyz export step -- "
+            f"was this file generated outside that pipeline?"
+        )
+
+    charge = int(atoms.info["charge"])
+    multiplicity = int(atoms.info["multiplicity"])
+
+    total_valence = sum(
+        extract_valence_electrons(KIND_PARAMS[s][1])
+        for s in atoms.get_chemical_symbols()
+    )
+    n_electrons = total_valence - charge
+
+    if (multiplicity - 1) % 2 != n_electrons % 2:
+        raise ValueError(
+            f"{name}: inconsistent spin state re-detected at CP2K-write time -- "
+            f"charge={charge} gives {n_electrons} electrons, incompatible with "
+            f"multiplicity={multiplicity}. Refusing to write a broken input."
+        )
+
+    uks = multiplicity != 1
+    return charge, multiplicity, uks
 
 
 def calculate_added_mos(atoms) -> int:
@@ -513,10 +549,11 @@ def write_cp2k_sp(atoms, name, outdir, stress_tensor=True, libdir=LIBDIR):
             f"Refusing to write an input with atoms that have no matching &KIND "
             f"(this used to fail silently)."
         )
-
+    charge, multiplicity, uks = _resolve_dft_charge_state(atoms, name)
     a, b, c = _resolve_cell(atoms, name)
     print(f"  Writing CP2K input for {name}: "
-          f"{len(atoms)} atoms  cell = {a:.6f} {b:.6f} {c:.6f}")
+          f"{len(atoms)} atoms  cell = {a:.6f} {b:.6f} {c:.6f}"
+          f"charge={charge}  multiplicity={multiplicity}  UKS={uks}")
 
     coords = ""
     for sym, pos in zip(atoms.get_chemical_symbols(), atoms.get_positions()):
@@ -533,6 +570,10 @@ def write_cp2k_sp(atoms, name, outdir, stress_tensor=True, libdir=LIBDIR):
 
     scf_block = _build_scf_block(atoms)
 
+    charge_uks_block = f"    CHARGE {charge}"
+    if uks:
+        charge_uks_block += f"\n    UKS .TRUE.\n    MULTIPLICITY {multiplicity}"
+
     if stress_tensor:
         stress_print = "    &STRESS_TENSOR\n    &END STRESS_TENSOR"
         stress_tensor_line = "  STRESS_TENSOR ANALYTICAL\n"
@@ -544,6 +585,7 @@ def write_cp2k_sp(atoms, name, outdir, stress_tensor=True, libdir=LIBDIR):
         name=name, a=a, b=b, c=c,
         coords=coords.rstrip(), kinds=kinds,
         scf_block=scf_block, libdir=libdir,
+        charge_uks_block=charge_uks_block,
         stress_print=stress_print, stress_tensor_line=stress_tensor_line,
     )
 
