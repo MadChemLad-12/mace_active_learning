@@ -28,7 +28,7 @@ class ActivePipelineConfig:
     geoopt_trigger_force: float = 20.0   # eV/Å -- flags "broken", not "uncertain"
     geoopt_max_steps: int = 30           # cheap cap, not a full anneal
     geoopt_fmax_target: float = 2.0      # eV/Å -- "no longer exploding" target
-    apply_d3: bool = True                # MACE+D3 vs MACE-only for this round
+    apply_d3: bool = False                # MACE+D3 vs MACE-only for this round
 
     # --- External datasets ---
     external_datasets: bool = False
@@ -45,7 +45,7 @@ class ActivePipelineConfig:
 
     # --- REICO (random imaginary-chemical box) sampling ---
     reico_sampling: bool = True
-    reico_num: int = 1                # random boxes generated per round
+    reico_num: int = 10               # random boxes generated per round
     reico_min_atoms: int = 20
     reico_max_atoms: int = 60
     reico_vol_per_atom: float = 12.0   # Å³/atom, condensed-phase packing density

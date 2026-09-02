@@ -20,7 +20,7 @@ class ActivePipelineConfig:
     geoopt_trigger_force: float = 20.0   # eV/Å -- flags "broken", not "uncertain"
     geoopt_max_steps: int = 30           # cheap cap, not a full anneal
     geoopt_fmax_target: float = 2.0      # eV/Å -- "no longer exploding" target
-    apply_d3: bool = True                # MACE+D3 vs MACE-only for this round
+    apply_d3: bool = False                # MACE+D3 vs MACE-only for this round
 
     # --- External datasets ---
     external_datasets: bool = False
@@ -60,7 +60,7 @@ class NebGeoRunConfig:
     max_steps: int = 800              # max optimisation steps per structure
     optimizer: str = "FIRE"           # "BFGS" (smooth surfaces) or "FIRE" (robust)
     skip_optimisation: bool = False
-    apply_d3: bool = True
+    apply_d3: bool = False
 
     # --- Atom fixing ---
     fix_by_height: bool = False

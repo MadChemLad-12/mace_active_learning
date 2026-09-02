@@ -33,7 +33,7 @@ METALS = {"Pt", "Li"}  # extend if other transition metals are added later
 IONIC_SPECIES_CHARGE = {
     "BF4": -1, "TFSI": -1, "FSI": -1, "PF6": -1,
     "PYR13": +1,
-    # extend as you add species
+    
 }
 
 # --- Location of training files ---
@@ -50,6 +50,11 @@ KIND_PARAMS = {
     "F":  ("DZVP-MOLOPT-SR-GTH-q7",  "GTH-PBE-q7"),
     "S":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
     "Pt": ("DZVP-MOLOPT-SR-GTH-q18", "GTH-PBE-q18"),
+    "B":  ("DZVP-MOLOPT-SR-GTH-q3",  "GTH-PBE-q3"),
+    "P":  ("DZVP-MOLOPT-SR-GTH-q5",  "GTH-PBE-q5"),
+    "Li": ("DZVP-MOLOPT-SR-GTH-q3", "GTH-PBE-q3"),
+    "N":  ("DZVP-MOLOPT-SR-GTH-q5", "GTH-PBE-q5"),
+
 }
 
 # --- Default simulation cell (a, b, c) in Angstrom, keyed by substring
@@ -67,7 +72,7 @@ DEFAULT_CELLS = {
 
 # --- E0 reference data file (isolated-atom energies, produced once per
 # round via the E0 calculation step, but the filename convention is stable) ---
-E0_JSON = "configs/E0s.json"
+E0_JSON = "configs/E0s_ionicliquid.json"
 E0_CELL_SIZE = 20.0  # Angstrom, cubic box for isolated-atom E0 calculations
 
 # --- External training-set filename tags that should never be pruned

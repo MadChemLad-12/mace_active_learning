@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 @dataclass
 class CheckResidualConfig:
-    apply_d3: bool = True          # apply D3 correction to MACE energies
+    apply_d3: bool = False          # apply D3 correction to MACE energies
     max_force_ref: float = 40.0    # eV/Å, max force for a structure to be valid
     max_rmse: float = 1000.0       # meV/Å, max RMSE force for a structure to be valid
     non_pt_thresh: float = 5.3     # Å, z-height threshold for non-Pt atoms entering slab

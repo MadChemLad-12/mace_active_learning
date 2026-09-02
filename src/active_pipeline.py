@@ -1768,6 +1768,25 @@ def create_random_box(elements, n_atoms, config: ActivePipelineConfig, max_attem
             )
     return atoms
 
+def _resolve_reico_charge_state(atoms, name):
+    """
+    REICO boxes have no fragment identity -- they're synthetic atom soup.
+    Charge is always assumed neutral (0); multiplicity is inferred from
+    electron parity, exactly like the CSV-row fallback path. This can't
+    use IONIC_SPECIES_CHARGE since there's no real ion here to look up.
+    """
+    total_valence = sum(
+        extract_valence_electrons(KIND_PARAMS[s][1])
+        for s in atoms.get_chemical_symbols()
+    )
+    charge = 0
+    n_electrons = total_valence - charge
+    multiplicity = 1 if (n_electrons % 2 == 0) else 2
+    atoms.info["charge"] = charge
+    atoms.info["multiplicity"] = multiplicity
+    print(f"  [→] {name}: REICO charge=0 (assumed neutral), "
+          f"multiplicity={multiplicity} (from parity)")
+
 # ============================================================
 # Main entry points
 # ============================================================
@@ -1916,6 +1935,7 @@ def run_round(config: ActivePipelineConfig):
                     print(f"    [!] REICO: {e}")
                     continue
                 box.info["system_type"] = "reico_random"
+                _resolve_reico_charge_state(box, box.info["system_type"])
                 reico_frames.append(box)
             print(f"  [✓] REICO: generated {len(reico_frames)}/{config.reico_num} boxes ({n_failed} failed)")
             reico_frames = relax_pathological_frames(reico_frames, calc, config=config)
@@ -2368,6 +2388,13 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
                 n_excluded += 1
                 continue
             atoms.info["system_type"] = sys_type
+            charge, multiplicity = _read_dft_state_from_inp(cp2k_dir, stem)
+            
+            if charge is not None:
+                atoms.info["charge"] = charge
+                atoms.info["multiplicity"] = multiplicity
+            else:
+                print(f"  [!] {stem}: no matching .inp found — charge/multiplicity not recorded.")
 
             # Check hash against pool before parsing .out
             geom_hash = get_atoms_hash(atoms)
@@ -2534,6 +2561,22 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
         }
     _save_geometry_index(geom_index)
     print(f"[✓] Global geometry index updated")
+
+def _read_dft_state_from_inp(cp2k_dir, stem):
+    """
+    Recovers CHARGE/UKS/MULTIPLICITY from the actual .inp CP2K ran --
+    the authoritative record of what state produced REF_energy, not a
+    fresh recomputation that could silently disagree with it.
+    """
+    inp_path = Path(cp2k_dir) / f"{stem}.inp"
+    if not inp_path.exists():
+        return None, None
+    text = inp_path.read_text()
+    charge_m = re.search(r"^\s*CHARGE\s+(-?\d+)", text, re.MULTILINE)
+    mult_m   = re.search(r"^\s*MULTIPLICITY\s+(\d+)", text, re.MULTILINE)
+    charge = int(charge_m.group(1)) if charge_m else None
+    multiplicity = int(mult_m.group(1)) if mult_m else 1  # absent UKS block => singlet
+    return charge, multiplicity
  
 def _write_outputs(new_frames, failed):
     print("\n[→] Writing per-system training files...")

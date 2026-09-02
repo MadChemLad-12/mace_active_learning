@@ -237,15 +237,19 @@ bash run_pipeline.sh
 Edit **`configs.csv`** to list every initial/final structure pair you want to explore. The `Name` column becomes the `system_type` tag throughout the pipeline.
 
 ```csv
-Name,initial,final
-MySlab_OH,structures/slab_clean.cif,structures/slab_OH.cif
-MySlab_O,structures/slab_clean.cif,structures/slab_O.cif
-BulkWater,structures/water_box.pdb,
+Name,initial,final,charge,multiplicity,fragments
+Pt_atom,structures/Pt_atom.cif,,,,
+Ionicliquid,structures/ionicliquid.cif,,guess,guess,"TFSI:2;FSI:2;BF4:2;PF6:2;PYR13:2"
+BF4,structures/BF4.cif,,-1,2,"BF4:1"
+SO3Pt111,structures/SO3Pt111.cif,structures/SO3Pt111.cif,,,
 ```
 
 - `final` can be left blank for systems where you only want a geometry optimisation (no NEB).
 - Paths can be absolute or relative to the working directory.
 - The `Name` is used to name all output files, so keep it short and without spaces.
+- charge is the charge of the system
+- multiplicity is the electron spin of the system (can be left blank)
+- Fragment of molecules in system (easy way to add charge to system)
 
 ---
 

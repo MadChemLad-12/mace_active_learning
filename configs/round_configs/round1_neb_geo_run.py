@@ -19,7 +19,7 @@ class NebGeoRunConfig:
     max_steps: int = 800              # max optimisation steps per structure
     optimizer: str = "FIRE"           # "BFGS" (smooth surfaces) or "FIRE" (robust)
     skip_optimisation: bool = False
-    apply_d3: bool = True
+    apply_d3: bool = False
 
     # --- Atom fixing ---
     fix_by_height: bool = False

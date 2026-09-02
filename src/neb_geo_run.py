@@ -141,19 +141,38 @@ with open(PATH_CSV, newline='') as csvfile:
     
 def parse_fragments_field(raw: str | None) -> dict[str, int] | None:
     """
-    Parses 'TFSI:5;FSI:5;BF4:5;PF6:5;PYR13:5' into {'TFSI':5, 'FSI':5, ...}.
-    Bare species with no ':' default to count=1 (e.g. single-ion case: 'BF4').
+    Parses 'TFSI:2;FSI:2;BF4:2;PF6:2;PYR13:2' into {'TFSI':2, 'FSI':2, ...}.
+    Bare species with no ':' default to count=1.
+    Strips stray quote characters left over from CSV quoting artifacts,
+    not just whitespace -- trailing '"' has broken this in practice.
     """
     if not raw:
         return None
+
+    def _clean(s: str) -> str:
+        return s.strip().strip('"').strip("'").strip()
+
+    raw = _clean(raw)
+    if not raw:
+        return None
+
     fragments = {}
     for entry in raw.split(";"):
-        entry = entry.strip()
+        entry = _clean(entry)
         if not entry:
             continue
         if ":" in entry:
             species, count_str = entry.split(":", 1)
-            species, count = species.strip(), int(count_str.strip())
+            species = _clean(species)
+            count_str = _clean(count_str)
+            try:
+                count = int(count_str)
+            except ValueError:
+                raise ValueError(
+                    f"Could not parse fragment count from {entry!r} "
+                    f"(cleaned count string was {count_str!r}). "
+                    f"Check the CSV for stray quotes or formatting around this field."
+                )
         else:
             species, count = entry, 1
         fragments[species] = fragments.get(species, 0) + count
@@ -705,6 +724,8 @@ def export_geoopt_for_al(name, init_atoms, final_atoms, charge, multiplicity, fr
     """
     frames = []
     for label, atoms in [("initial", init_atoms), ("final", final_atoms)]:
+        if atoms is None:
+            continue
         at = atoms.copy()
         at.info["system_type"] = name
         at.info["geoopt_label"] = label
@@ -712,9 +733,12 @@ def export_geoopt_for_al(name, init_atoms, final_atoms, charge, multiplicity, fr
         at.info["charge"] = charge
         at.info["multiplicity"] = multiplicity
         if fragments:
-            at.info["fragments"] = ",".join(fragments)
+            at.info["fragments"] = ",".join(f"{sp}:{n}" for sp, n in fragments.items())
         frames.append(at)
-
+    if not frames:
+        print(f"  [!] No frames to export for {name} — skipping AL export.")
+        return
+        
     al_path = os.path.join(AL_EXPORT_DIR, f"mace_geoopt_{name}.extxyz")
     write(al_path, frames, format="extxyz")
     print(f"[✓] GeoOpt frames exported for AL: {al_path}")
@@ -1221,11 +1245,35 @@ def main():
                 config_result[f"{label}_status"] = "FAILED"
 
         # ── EXPORT GEO-OPT FOR AL ─────────────────────────────────────────────
-        if "initial" in current_run_atoms and "final" in current_run_atoms:
-            export_geoopt_for_al(name, current_run_atoms["initial"], current_run_atoms["final"])
-        elif CONFIG.skip_optimisation:
-            if os.path.exists(init_path) and os.path.exists(final_path):
-                export_geoopt_for_al(name, read(init_path), read(final_path))
+        init_atoms_for_export  = current_run_atoms.get("initial")
+        final_atoms_for_export = current_run_atoms.get("final")
+
+        if CONFIG.skip_optimisation:
+            # raw files may not have been loaded into current_run_atoms at all
+            if init_atoms_for_export is None and os.path.exists(init_path):
+                init_atoms_for_export = read(init_path)
+            if final_atoms_for_export is None and final_path and os.path.exists(final_path):
+                final_atoms_for_export = read(final_path)
+
+        if init_atoms_for_export is not None or final_atoms_for_export is not None:
+            fragments = parse_fragments_field(structure.get("fragments"))
+            ref_atoms = init_atoms_for_export if init_atoms_for_export is not None else final_atoms_for_export
+            charge, multiplicity = resolve_charge_multiplicity(
+                structure.get("charge"),
+                structure.get("multiplicity"),
+                fragments,
+                ref_atoms,
+            )
+            export_geoopt_for_al(
+                name,
+                init_atoms_for_export,
+                final_atoms_for_export,
+                charge,
+                multiplicity,
+                fragments,
+            )
+        else:
+            print(f"  [!] No optimised or raw structures available for {name} — skipping AL export.")
 
         # ── NEB STEP ──────────────────────────────────────────────────────────
         init_ok  = "STABLE" in config_result.get("initial_status", "") or CONFIG.skip_optimisation
