@@ -1,0 +1,6 @@
+Model,E-RMSE(meV/at),E-MAE,E-R2,F-RMSE(meV/A),F-MAE,F-R2,Frames
+mace-mp-0b3-medium-float32,471.64,446.20,0.9382,237.53,143.59,0.8495,264
+mace_V5_active_learning_stagetwo,122.86,53.34,0.9731,175.87,77.84,0.9175,264
+mace_V5_active_learning_stagetwo,122.88,53.38,0.9731,175.87,77.84,0.9175,264
+mace-mpa-0-medium,484.20,458.10,0.9385,217.05,131.40,0.8743,264
+mace-omat-0-medium,481.13,458.58,0.9385,211.04,129.70,0.8812,264

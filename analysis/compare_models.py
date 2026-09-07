@@ -48,10 +48,16 @@ from ase.io import read, write
 from ase.config import cfg
 from ase.calculators.mixing import SumCalculator
 from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
-from patches import apply_dftd3_cell_patch
-apply_dftd3_cell_patch()
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from configs.round_configs.schema import ActivePipelineConfig
-from configs.constants import HELD_OUT, E0_JSON, CLEAN_TRAIN, BAD_TRAIN, HELD_OUT, MASTER_TRAIN
+from configs.constants import HELD_OUT, E0_JSON, CLEAN_TRAIN, BAD_TRAIN, MASTER_TRAIN
+from src.patches import apply_dftd3_cell_patch
+apply_dftd3_cell_patch()
+
 
 ROUND = ActivePipelineConfig.round
 def load_residual_config(ROUND: int) -> ActivePipelineConfig:
