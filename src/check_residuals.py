@@ -95,7 +95,7 @@ def find_residuals(frames):
         stype = atoms.info.get("system_type", "unknown")
         residuals[stype].append(e_residual_per_atom)
 
-    print("\nResidual summary:")
+    print("\nResidual summary by system_type:")
     for stype, vals in residuals.items():
         print(f"  {stype}: mean residual = {np.mean(vals):.4f} eV/atom  "
               f"std = {np.std(vals):.4f} eV/atom  (n={len(vals)})")
@@ -135,6 +135,7 @@ for atoms in frames:
 print(f"Before dedup: {len(frames)}")
 print(f"After dedup:  {len(unique_frames)}")
 print(f"Duplicates removed: {len(duplicates)}")
+pool_changed = len(duplicates) > 0   # dedup alone changes what's on disk
 if duplicate_ids:
     print("Top 10 duplicate (geometry, model) groups and their frame IDs:")
     for h, ids in list(duplicate_ids.items())[:10]:
@@ -143,6 +144,8 @@ if duplicate_ids:
 find_residuals(unique_frames)
 
 good, bad, bad_info = [], [], []
+# pool_changed already set above (True if dedup dropped anything); per-frame
+# loop below flips it True further if any frame falls through the cache.
 
 # ============================================================
 # Choose the MACE model used for THIS verification pass, and label
@@ -189,13 +192,35 @@ for index, atoms in enumerate(unique_frames):
     atom_number  = len(atoms)
     labeling_model = atoms.info.get(MODEL_INFO_KEY, "unknown")
 
-    # Every frame that leaves this loop (good or bad) gets tagged with
-    # which model ran this verification pass over it.
+    # ── Cache check: has THIS model already verified this frame? ─────────────
+    # verification_model (not `model`, which is selection provenance) is the
+    # field tied to the calculator identity. If it matches the model we just
+    # loaded, the stored verdict is still valid — REF_* never changes, and
+    # residual/fmax are REF-derived so they can't have drifted either. Only
+    # the MACE-vs-REF comparison (step 4) actually depends on which model is
+    # loaded, so a match means: skip everything, reuse the verdict.
+    cached_model = atoms.info.get("verification_model")
+    if cached_model == VERIFICATION_MODEL_NAME and "curation_status" in atoms.info:
+        if atoms.info["curation_status"] == "good":
+            good.append(atoms)
+        else:
+            bad.append(atoms)
+            bad_info.append(f"[cached] {stype} index={index} model={labeling_model} "
+                            f"reason={atoms.info.get('curation_reason', 'unknown')}")
+        continue
+
+    # Model changed (or frame never verified before) — recompute below and
+    # overwrite verification_model/curation_status with fresh results.
+    # REF_energy / REF_forces / REF_stress are CP2K ground truth and are
+    # never touched here.
+    pool_changed = True
     atoms.info["verification_model"] = VERIFICATION_MODEL_NAME
 
     # ── 0. Check it does not exceed atom count max ───────────────────────────
     if atom_number > MAX_COUNT:
         bad.append(atoms)
+        atoms.info["curation_status"] = "bad"
+        atoms.info["curation_reason"] = "too_many_atoms_in_structure"
         bad_info.append(f"[too_many_atoms_in_structure] model={labeling_model} "
                         f"system_count={atom_number}, MAX_COUNT={MAX_COUNT}")
         continue
@@ -248,6 +273,8 @@ for index, atoms in enumerate(unique_frames):
     if is_slab:
         if len(non_pt_z) > 0 and np.min(non_pt_z) < NON_PT_THRESH:
             bad.append(atoms)
+            atoms.info["curation_status"] = "bad"
+            atoms.info["curation_reason"] = "non_pt_z_too_low"
             bad_info.append(f"[non_pt_z_too_low] index={index} {stype} model={labeling_model} "
                             f"min_z={np.min(non_pt_z):.2f} Å  pt_count={pt_count}")
             continue
@@ -270,6 +297,8 @@ for index, atoms in enumerate(unique_frames):
     coh_lo, coh_hi = get_residual_bounds(symbols_set, pt_count)
     if not (coh_lo < coh < coh_hi):
         bad.append(atoms)
+        atoms.info["curation_status"] = "bad"
+        atoms.info["curation_reason"] = "cohesive_energy"
         bad_info.append(f"[cohesive_energy] {stype} index={index} model={labeling_model} "
                         f"coh={coh:.2f} eV/atom (allowed {coh_lo} to {coh_hi})")
         continue
@@ -282,6 +311,8 @@ for index, atoms in enumerate(unique_frames):
 
     if max_f_ref > MAX_FORCE_REF:
         bad.append(atoms)
+        atoms.info["curation_status"] = "bad"
+        atoms.info["curation_reason"] = "ref_force_too_large"
         bad_info.append(f"[ref_force_too_large] {stype} index={index} model={labeling_model} "
                         f"max_ref_F={max_f_ref:.2f} eV/Å")
         continue
@@ -292,6 +323,8 @@ for index, atoms in enumerate(unique_frames):
     mace_f = atoms_copy.get_forces()
     if np.isnan(mace_f).any():
         bad.append(atoms)
+        atoms.info["curation_status"] = "bad"
+        atoms.info["curation_reason"] = "mace_nan_forces"
         bad_info.append(f"[mace_nan_forces] {stype} index={index} model={labeling_model} "
                         f"MACE ({VERIFICATION_MODEL_NAME}) returned NaN forces.")
         continue
@@ -301,6 +334,8 @@ for index, atoms in enumerate(unique_frames):
     rmse_thresh = get_force_bounds(symbols_list, pt_count)
     if rmse > rmse_thresh:
         bad.append(atoms)
+        atoms.info["curation_status"] = "bad"
+        atoms.info["curation_reason"] = "high_rmse"
         bad_info.append(f"[high_rmse] {stype} index={index} model={labeling_model} "
                         f"RMSE={rmse:.1f} meV/Å (threshold={rmse_thresh}) "
                         f"max_MACE={max_mace:.2f}  max_REF={max_f_ref:.2f} eV/Å")
@@ -308,6 +343,8 @@ for index, atoms in enumerate(unique_frames):
 
     # ── 5. Passed all checks ──────────────────────────────────────────────────
     atoms.info["rmse_meV_A"] = float(rmse)
+    atoms.info["curation_status"] = "good"
+    atoms.info.pop("curation_reason", None)
     good.append(atoms)
 
 # Print summary
@@ -319,6 +356,18 @@ for info in bad_info:
 # Write — both lists contain only Atoms objects now
 ase.io.write(CLEAN_TRAIN, good)
 ase.io.write(BAD_TRAIN,   bad)
+
+# Persist curation_status / verification_model / rmse_meV_A back to the
+# master pool itself — otherwise every field set above (including the
+# cache this script relies on) is recomputed and discarded on the next run.
+# Only write if something actually changed this run (new/re-verified frames,
+# or dedup dropped something) if every frame hit the cache, master_train_pool.xyz
+# already has exactly what we'd write, so skip the I/O entirely.
+if pool_changed:
+    ase.io.write(MASTER_TRAIN, unique_frames, format="extxyz")
+    print(f"[✓] Wrote curation results back to {MASTER_TRAIN} ({len(unique_frames)} frames)")
+else:
+    print(f"[✓] {MASTER_TRAIN} already up to date — no frames needed recomputation, skipped write")
 
 print(f"\nThe E0s of the clean data is")
 generate_E0s(good)
