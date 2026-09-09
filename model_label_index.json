@@ -1,6 +1,0 @@
-{
-  "sp_SO3Pt111_r1_0000": {
-    "model": "mace_V8_active_learning_stagetwo",
-    "cp2k_dir": "cp2k_sp_round1"
-  }
-}
