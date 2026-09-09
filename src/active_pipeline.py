@@ -91,7 +91,7 @@ def apply_round(n: int, custom_model_path: str = None):
     elif ROUND > 3:
         MODEL_PATH = f"mace_V{ROUND-1}_active_learning_stagetwo.model"
     else:
-        MODEL_PATH = FOUNDATION_MODEL_PATH
+        MODEL_PATH = _FOUNDATION_MODEL
 
     CP2K_DIR = f"cp2k_sp_round{n}"
     FAILED_LOG = f"cp2k_sp_round{n}/failed_jobs.txt"
@@ -138,6 +138,31 @@ def rescore_with_mace(frames, model_path: str, config: ActivePipelineConfig):
     return frames
 
 # ============================================================
+# Shared SOAP featurizer for FPS (diversity selection)
+# ============================================================
+
+# Tune r_cut to the interaction range you care about resolving; keep this
+# in one place so fps_sample_md_trajectory and select_uncertain_frames
+# always build directly comparable features.
+_SOAP_KWARGS = dict(r_cut=5.0, n_max=8, l_max=5, average="inner", periodic=True)
+
+def build_soap_features(frames):
+    """
+    Compute one normalised SOAP vector per frame.
+    Rotation/translation/permutation invariant, unlike flattened positions —
+    see the earlier discussion on why raw-position FPS was misleading FPS
+    into treating rotated/reindexed duplicates as maximally diverse.
+    """
+    from dscribe.descriptors import SOAP
+
+    species = sorted(set(sym for atoms in frames for sym in atoms.get_chemical_symbols()))
+    soap = SOAP(species=species, **_SOAP_KWARGS)
+    features = soap.create(frames, n_jobs=-1)
+
+    norms = np.linalg.norm(features, axis=1, keepdims=True)
+    return features / np.where(norms == 0, 1, norms)
+
+# ============================================================
 # MD trajectory sampler — FPS diversity, NOT force-scored
 # ============================================================
  
@@ -155,11 +180,10 @@ def fps_sample_md_trajectory(frames, n_select, system_name):
     Strategy
     --------
     1. Stride the trajectory first (max 500 frames) so FPS is fast.
-    2. Run FPS on flattened, normalised position vectors.
+    2. Run FPS on SOAP-descriptor vectors (rotation/translation/permutation
+       invariant — NOT flattened raw positions, which are none of those things).
     3. Tag each frame with system_type and source before returning.
     """
-    from sklearn.preprocessing import normalize
- 
     # Stride to keep FPS tractable for long trajectories
     MAX_POOL = 500
     if len(frames) > MAX_POOL:
@@ -170,17 +194,7 @@ def fps_sample_md_trajectory(frames, n_select, system_name):
     if len(frames) <= n_select:
         chosen = list(range(len(frames)))
     else:
-        # Build feature matrix — use first FEATURE_DIM position coords
-        FEATURE_DIM = 300
-        features = []
-        for atoms in frames:
-            pos = atoms.get_positions().flatten()
-            if len(pos) >= FEATURE_DIM:
-                features.append(pos[:FEATURE_DIM])
-            else:
-                features.append(np.pad(pos, (0, FEATURE_DIM - len(pos))))
- 
-        features  = normalize(np.array(features))
+        features = build_soap_features(frames)
         chosen    = [0]
         min_dists = np.full(len(frames), np.inf)
  
@@ -252,11 +266,10 @@ def load_candidates(al_input_dir):
 
 def select_uncertain_frames(frames, n_select, force_threshold=None):
     """
-    Score by MACE max-force, then apply FPS for geometric diversity.
+    Score by MACE max-force, then apply FPS (on SOAP descriptors) for
+    geometric diversity within the high-uncertainty candidate pool.
     Returns a list of selected Atoms objects.
     """
-    from sklearn.preprocessing import normalize
-
     # --- Score ---
     scores = []
     print("\nScoring frames by MACE max force...")
@@ -284,19 +297,14 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
     if len(candidates) <= n_select:
         return [frames[i] for i in candidates]
 
-    # --- FPS for diversity ---
-    FEATURE_DIM = 300
-    features = []
+    # --- FPS for diversity, SOAP features, computed ONLY on the
+    #     candidate pool (not the full trajectory) so pre-filtering
+    #     actually saves the work it's meant to save ---
     print(f"\nApplying FPS to {len(candidates)} candidates (force threshold: {force_threshold})...")
-    for idx in candidates:
-        pos = frames[idx].get_positions().flatten()
-        if len(pos) >= FEATURE_DIM:
-            features.append(pos[:FEATURE_DIM])
-        else:
-            features.append(np.pad(pos, (0, FEATURE_DIM - len(pos))))
+    candidate_frames = [frames[i] for i in candidates]
+    features = build_soap_features(candidate_frames)
 
-    features   = normalize(np.array(features))
-    selected   = [0]
+    selected   = [0]                                   # index into candidates/features
     min_dists  = np.full(len(candidates), np.inf)
 
     for _ in range(n_select - 1):
@@ -607,6 +615,80 @@ def get_atoms_hash(atoms):
     nuc_data = atoms.get_atomic_numbers().tobytes()
     return hashlib.md5(pos_data + nuc_data).hexdigest()
 
+# ============================================================
+# Model-provenance labeling (which MACE model selected/labeled each frame)
+# ============================================================
+MODEL_LABEL_INDEX = "model_label_index.json"
+MODEL_INFO_KEY    = "model"   # single canonical atoms.info key used everywhere
+
+def _load_model_label_index():
+    p = Path(MODEL_LABEL_INDEX)
+    if p.exists():
+        with open(p) as f:
+            return json.load(f)
+    return {}
+
+def _save_model_label_index(index):
+    with open(MODEL_LABEL_INDEX, "w") as f:
+        json.dump(index, f, indent=2)
+
+def register_model_labels(stems, model_path, cp2k_dir):
+    """
+    Record that these CP2K job stems (e.g. sp_ptnafion_r6_0003) were
+    selected/labeled using `model_path`. Call this once per batch of
+    .inp files written, right after write_cp2k_sp for each frame.
+    """
+    index = _load_model_label_index()
+    model_name = Path(model_path).stem
+    for stem in stems:
+        index[stem] = {"model": model_name, "cp2k_dir": str(cp2k_dir)}
+    _save_model_label_index(index)
+    print(f"[✓] Registered {len(stems)} job(s) under model '{model_name}' in {MODEL_LABEL_INDEX}")
+
+def get_labeled_hash(atoms, model_name):
+    """
+    Compound (geometry, model) fingerprint. Distinct from get_atoms_hash:
+    the SAME geometry labeled by two different models must NOT collide,
+    since master.xyz intentionally stores multiple models' verification
+    labels per geometry.
+    """
+    geom_hash = get_atoms_hash(atoms)
+    return hashlib.md5(f"{geom_hash}:{model_name}".encode()).hexdigest()
+
+def get_labeled_hash_from_info(atoms):
+    """Same as get_labeled_hash, reading the model name back out of atoms.info."""
+    model_name = atoms.info.get(MODEL_INFO_KEY, "unknown")
+    return get_labeled_hash(atoms, model_name)
+
+def compute_frame_metrics(atoms, energy_eV, forces, e_ref, coh_lo, coh_hi):
+    """
+    Compute every downstream-analysis metric once, at parse time, and
+    return a dict to merge into atoms.info. Keeps fmax / residual / Pt-z
+    permanently attached to the frame so nothing downstream (this script's
+    later stages, check_residuals.py, ad-hoc analysis) needs to reopen the
+    .out file or recompute them.
+    """
+    n_atoms = len(atoms)
+    residual = (energy_eV - e_ref) / n_atoms
+
+    force_mags = np.linalg.norm(forces, axis=1) if forces is not None else None
+    fmax = float(np.max(force_mags)) if force_mags is not None and len(force_mags) else None
+
+    symbols = atoms.get_chemical_symbols()
+    z_positions = atoms.get_positions()[:, 2]
+    pt_idx = [i for i, s in enumerate(symbols) if s == "Pt"]
+    lowest_pt_z = float(np.min(z_positions[pt_idx])) if pt_idx else None
+
+    return {
+        "residual_eV_per_atom": residual,
+        "coh_lo": coh_lo,
+        "coh_hi": coh_hi,
+        "coh_ok": bool(coh_lo < residual < coh_hi) if coh_lo is not None else None,
+        "fmax": fmax,
+        "lowest_pt_z": lowest_pt_z,
+        "pt_count": len(pt_idx),
+    }
+
 GLOBAL_GEOM_INDEX = "geometry_index_global.json"
 
 def _load_geometry_index(cp2k_dir):
@@ -807,8 +889,8 @@ export OPENBLAS_NUM_THREADS=1
 total={len(jobs)}
 
 # --- memory guard settings ---
-MEM_LIMIT_KB=$(( 62 * 1024 * 1024 * 90 / 100 ))   # 90% of 62GB, in KB
-MEM_CHECK_INTERVAL=10                               # seconds between checks
+MEM_LIMIT_KB=$(( 62 * 1024 * 1024 * 85 / 100 ))   # 85% of 62GB, in KB
+MEM_CHECK_INTERVAL=2                               # seconds between checks
 FAILED_LOG={cp2k_dir}/failed_jobs.txt
 TIMES_LOG={cp2k_dir}/job_times.log
 
@@ -945,6 +1027,7 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, config: ActivePipelineConfig,
                 
     all_jobs     = []
     missing_jobs = []
+    written_stems  = []
     reused_direct  = 0
     reused_hash    = 0
     reused_pool    = 0   
@@ -974,6 +1057,7 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, config: ActivePipelineConfig,
 
         inp      = write_cp2k_sp(atoms, name, cp2k_dir)
         all_jobs.append((name, inp))
+        written_stems.append(name)
         expected_out = Path(cp2k_dir) / f"{name}.out"
 
         if config.reuse_existing_cp2k:
@@ -1040,6 +1124,12 @@ def write_all_sp_inputs(selected_frames, cp2k_dir, config: ActivePipelineConfig,
     else:
         print(f"    [✓] Nothing to run — proceed with:")
         print(f"        python active_pipeline.py --parse")
+
+    # Record which model selected/labeled every job written this call, so
+    # --parse-all can later match cp2k.out files back to their labeling
+    # model without guessing.
+    if written_stems:
+        register_model_labels(written_stems, MODEL_PATH, cp2k_dir)
 
     return all_jobs
 
@@ -1795,7 +1885,7 @@ def run_round(config: ActivePipelineConfig):
     """Load MACE candidate files, select uncertain frames, write CP2K inputs."""
     print(f"\n{'='*60}")
     print(f"  Active Learning Round {config.round}")
-    print(f"  Model: {FOUNDATION_MODEL_PATH}")
+    print(f"  Model: {_FOUNDATION_MODEL}")
     print(f"{'='*60}\n")
     skipped_unphysical = 0
 
@@ -1803,7 +1893,7 @@ def run_round(config: ActivePipelineConfig):
     all_candidates = load_candidates(AL_INPUT_DIR)
 
     print(f"\n[→] Re-scoring {len(all_candidates)} NEB/GeoOpt frames with MACE...")
-    all_candidates = rescore_with_mace(all_candidates, FOUNDATION_MODEL_PATH, config)
+    all_candidates = rescore_with_mace(all_candidates, _FOUNDATION_MODEL, config)
 
     geom_index = _load_geometry_index(CP2K_DIR) if config.reuse_existing_cp2k else {}
 
@@ -1837,7 +1927,7 @@ def run_round(config: ActivePipelineConfig):
     n_select_total = config.n_select_total
     print(f"\n[→] Selecting up to {n_select_total} frames that need CP2K...")
 
-    calc_mace = MACECalculator(model_paths=FOUNDATION_MODEL_PATH, device=config.device, default_dtype=config.dtype)
+    calc_mace = MACECalculator(model_paths=_FOUNDATION_MODEL, device=config.device, default_dtype=config.dtype)
     if config.apply_d3:
         print(f"  [→] D3 dispersion correction will be applied to MACE scores.")
         calc_DFT = TorchDFTD3Calculator(
@@ -2286,8 +2376,17 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
         print(f"\n[→] No existing master pool — will create {POOL_FILE}")
         pool = []
 
-    pool_hashes = {get_atoms_hash(a) for a in pool}
-    print(f"    {len(pool_hashes)} unique geometries already in pool")
+    pool_labeled_hashes = {get_labeled_hash_from_info(a) for a in pool}
+    print(f"    {len(pool_labeled_hashes)} unique (geometry, model) pairs already in pool")
+
+    # ----------------------------------------------------------------
+    # Step 1b — Load model-label index (written by write_all_sp_inputs)
+    # ----------------------------------------------------------------
+    model_index = _load_model_label_index()
+    if not model_index:
+        print(f"\n[!] {MODEL_LABEL_INDEX} not found or empty — every .out file will be "
+              f"skipped until write_all_sp_inputs registers it. Re-run the selection "
+              f"step first, or check the file wasn't deleted.")
 
     # ----------------------------------------------------------------
     # Step 2 — Find all cp2k_sp_round* directories
@@ -2337,6 +2436,23 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
             if not _cp2k_output_is_complete(out_path):
                 n_incomplete += 1
                 continue
+
+            # --------------------------------------------------------
+            # Model-provenance check — cheapest possible filter, so it
+            # runs before any regex parsing of the .out file itself.
+            # Every .out must have a matching entry in model_label_index.json
+            # (written when write_all_sp_inputs generated its .inp); files
+            # with no entry were never registered as a labeling job and are
+            # skipped rather than guessed at.
+            # --------------------------------------------------------
+            stem = out_path.stem
+            label_entry = model_index.get(stem)
+            if label_entry is None:
+                print(f"  [!] {stem}: no entry in {MODEL_LABEL_INDEX} — skipping "
+                      f"(was this .inp written by write_all_sp_inputs?)")
+                parse_failed += 1
+                continue
+            model_name = label_entry["model"]
             
             # --------------------------------------------------------
             # Parse positions + species from .inp
@@ -2376,7 +2492,6 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
             )
 
             # system_type from filename as before
-            stem = out_path.stem
             m2 = re.match(r"sp_(.+?)_r\d+(?:_\d+)?$", stem)
             if not m2:
                 # Filename doesn't match expected sp_{sys}_r{N}_{i:04d} pattern
@@ -2384,21 +2499,24 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
                 parse_failed += 1
                 continue
             sys_type = m2.group(1)
-            if _is_excluded(sys_type, config=CONFIG):
+            if _is_excluded(sys_type):
                 n_excluded += 1
                 continue
-            atoms.info["system_type"] = sys_type
+            atoms.info["system_type"]  = sys_type
             charge, multiplicity = _read_dft_state_from_inp(cp2k_dir, stem)
-            
+            atoms.info[MODEL_INFO_KEY] = model_name
             if charge is not None:
                 atoms.info["charge"] = charge
                 atoms.info["multiplicity"] = multiplicity
             else:
                 print(f"  [!] {stem}: no matching .inp found — charge/multiplicity not recorded.")
 
-            # Check hash against pool before parsing .out
-            geom_hash = get_atoms_hash(atoms)
-            if geom_hash in pool_hashes:
+            # Check compound (geometry, model) hash against pool. Same
+            # geometry labeled by a DIFFERENT model is not a duplicate —
+            # it's a verification record — so this must not collide with
+            # get_atoms_hash alone.
+            labeled_hash = get_labeled_hash(atoms, model_name)
+            if labeled_hash in pool_labeled_hashes:
                 n_dup += 1
                 already_have += 1
                 continue
@@ -2429,13 +2547,15 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
             symbols_set  = set(symbols_list)
             pt_count     = symbols_list.count("Pt")
             
-            # Validate residual — catch bad SCF before accepting
+            # Validate residual — catch bad SCF before accepting. Forces
+            # aren't parsed yet at this point, so fmax gets filled in
+            # (metrics recomputed) once the force block below succeeds.
             e_ref    = sum(E0s_ref.get(z, 0.0) for z in atoms.numbers)
-            residual = (energy_eV - e_ref) / len(atoms)
-
             coh_lo, coh_hi = get_coh_bounds(symbols_set, pt_count)
-            
-            if not (coh_lo < residual < coh_hi):
+            metrics  = compute_frame_metrics(atoms, energy_eV, None, e_ref, coh_lo, coh_hi)
+            residual = metrics["residual_eV_per_atom"]
+
+            if not metrics["coh_ok"]:
                 print(f"  [!] {out_path.name}: residual={residual:.2f} eV/atom "
                       f"(allowed {coh_lo} to {coh_hi}) — skipping")
                 parse_failed += 1
@@ -2480,15 +2600,24 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
             if not forces_ok:
                 atoms.info["forces_missing"] = True
             atoms.calc = None
-            
-            force_mags = np.linalg.norm(forces, axis=1)
-    
-            max_f = np.max(force_mags)
+
+            # Recompute metrics now that forces are available — this fills
+            # in fmax and refreshes residual/coh_ok/lowest_pt_z, and is
+            # what gets permanently stored so downstream scripts (including
+            # check_residuals.py) never need to reopen the .out file.
+            metrics = compute_frame_metrics(
+                atoms, energy_eV,
+                atoms.arrays.get("REF_forces") if forces_ok else None,
+                e_ref, coh_lo, coh_hi
+            )
+            atoms.info.update(metrics)
+            max_f = metrics["fmax"]
+
             # Accept
             new_frames.append(atoms)
-            pool_hashes.add(geom_hash)
+            pool_labeled_hashes.add(labeled_hash)
             atoms.info["_cp2k_dir"] = cp2k_dir
-            print(f"  [+] {stem}  "
+            print(f"  [+] {stem}  model={model_name}  "
                   f"E={energy_eV:.4f} eV  "
                   f"residual={residual:.3f} eV/atom  "
                   f"forces={f'ok max={max_f:.3f}' if forces_ok else 'MISSING'}  "
@@ -2664,7 +2793,7 @@ if __name__ == "__main__":
     if args.target != CONFIG.round:
         raise ValueError(f"Target round {args.target} does not match CONFIG.round {CONFIG.round}")
     
-    print(f"[→] Round {CONFIG.round}  |  Model: {args.model}  |  CP2K dir: {CP2K_DIR}")
+    print(f"[→] Round {CONFIG.round}  |  Model: {args.model}  |  CP2K dir: {CP2K_DIR}  |  E0 dir: {E0_DIR}  |  Max atoms: {CONFIG.max_atoms}")
     print("Starting execution for round context...\n")
 
     # -------------------------------------------------------------
@@ -2698,6 +2827,9 @@ if __name__ == "__main__":
     print("="*60)
     print(f"  Active Learning Round {CONFIG.round}")
     print(f"  Model: {_FOUNDATION_MODEL}")
+    print(f"  CP2K dir: {CP2K_DIR}")
+    print(f"  E0 dir: {E0_DIR}")
+    print(f"  Max atoms: {CONFIG.max_atoms}")
     print("="*60)
 
     default_elements = list(Z_MAP.keys())
