@@ -1,0 +1,74 @@
+{
+  "sp_BF4_r1_0000": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_Ionicliquid_r1_0001": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_Pt_atom_r1_0002": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_Pt_atom_r1_0004": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_SO3Pt111_r1_0002": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_SO3Pt111_r1_0003": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0003": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0004": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0005": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0006": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0007": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0008": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0009": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0010": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0011": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0012": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0013": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  },
+  "sp_reico_random_r1_0014": {
+    "model": "mace-mp-0b3-medium-float32.model",
+    "cp2k_dir": "cp2k_sp_round1"
+  }
+}

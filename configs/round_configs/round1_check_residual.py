@@ -53,7 +53,7 @@ class CheckResidualConfig:
             rmse_thresh = 1000
         elif "P" in symbols_set or "N" in symbols_set:
             rmse_thresh = 1000
-        elif symbols_set <= {"H", "O"}:                      # bulk water
+        elif set(symbols_set) <= {"H", "O"}:                      # bulk water
             rmse_thresh = 600
         elif any(s in symbols_set for s in ("F", "S")):      # Nafion
             rmse_thresh = 1000
@@ -63,6 +63,4 @@ class CheckResidualConfig:
 
 
 CONFIG = CheckResidualConfig()
-
-
 

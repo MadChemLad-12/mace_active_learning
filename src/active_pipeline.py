@@ -2499,7 +2499,7 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
                 parse_failed += 1
                 continue
             sys_type = m2.group(1)
-            if _is_excluded(sys_type):
+            if _is_excluded(sys_type, config):
                 n_excluded += 1
                 continue
             atoms.info["system_type"]  = sys_type
