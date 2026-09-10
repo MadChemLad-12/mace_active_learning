@@ -103,11 +103,19 @@ run_training_round() {
     fi
 
     echo "Retraining MACE model..."
+
+    RESTART_FLAG=()
+    if [[ $RESTART == "true" ]]; then
+        RESTART_FLAG=(--restart)
+    fi
+
     bash "${MACE_PATH}train_active_learning.sh" \
     --round "$ROUND" \
     --foundation "$FOUNDATION" \
-    --training "$TRAINING_PATH"
-    kill $TRACK_PID
+    --training "$TRAINING_PATH" \
+    "${RESTART_FLAG[@]}"
+
+    kill "$TRACK_PID"
 
     # Step 6: Compare
     if [ "$COMPARE_MODELS" = "True" ]; then
