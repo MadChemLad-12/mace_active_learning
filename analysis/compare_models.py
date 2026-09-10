@@ -194,7 +194,7 @@ def extract_model_e0s(model_path: str, head_name: str = "Default") -> dict:
 # ==============================================================================
 # Evaluation
 # ==============================================================================
-def evaluate_model(model_path, test_frames, device="cuda", dtype="float32",
+def evaluate_model(model_path, test_frames, device="cuda", dtype="float64",
                    ref_e0s=None, pred_e0s=None):
     """
     Evaluate model on every frame.

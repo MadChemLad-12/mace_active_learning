@@ -44,7 +44,7 @@ export SWA_START=1
 export PATIENCE=70
 export R_MAX=5.0
 export NUM_SAMPLES_PT=0   # Materials Project frames to mix in during multi-head training
-export FLOAT_TYPE="float32"
+export FLOAT_TYPE="float64"
 
 # Weights
 export FORCES_WEIGHT=100

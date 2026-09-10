@@ -13,15 +13,15 @@ from typing import Dict, List
 @dataclass
 class ActivePipelineConfig:
     # --- General ---
-    round: int = 1                     # overridden by args.target if provided
+    round: int = 8                     # overridden by args.target if provided
     n_select_total: int = 300          # overridden by args.runs
-    max_atoms: int = 580               # cap to avoid oversized GPU jobs
+    max_atoms: int = 900               # cap to avoid oversized GPU jobs
     reuse_existing_cp2k: bool = True   # skip inputs for frames w/ valid CP2K output
     exclude_system_keywords: List[str] = field(default_factory=list) # Example exclude_system_keywords: List[str] = field(default_factory=lambda: ["nafion"])
 
     # --- MACE ---
     device: str = "cuda"
-    dtype: str = "float32"
+    dtype: str = "float64"
         
     # --- Pathology geometry triage before CP2K (catches exploded frames early) ---
     geoopt_trigger: bool = True
@@ -66,15 +66,15 @@ def get_coh_bounds(symbols_set: set, pt_count: int) -> tuple:
     cohesive = (E_total - sum(E0_ref)) / n_atoms, eV/atom
     """
     if pt_count > 3:                                          # Pt slab
-        coh_lo, coh_hi = -20.0, 10.0
+        coh_lo, coh_hi = -10.0, 10.0
     elif pt_count > 0:                                        # dissolved Pt
-        coh_lo, coh_hi = -20.0, 10.0
+        coh_lo, coh_hi = -10.0, 10.0
     elif "P" in symbols_set or "N" in symbols_set:
-        coh_lo, coh_hi = -20.0, 7.0
+        coh_lo, coh_hi = -10.0, 10.0
     elif any(s in symbols_set for s in ("F", "S", "C")):       # Nafion-containing
-        coh_lo, coh_hi = -20.0, 10.0
+        coh_lo, coh_hi = -10.0, 10.0
     elif symbols_set <= {"H", "O"}:                            # bulk water
-        coh_lo, coh_hi = -20.0, 10.0
+        coh_lo, coh_hi = -10.0, 10.0
     else:                                                       # fallback
-        coh_lo, coh_hi = -20.0, 5.0
+        coh_lo, coh_hi = -10.0, 5.0
     return coh_lo, coh_hi

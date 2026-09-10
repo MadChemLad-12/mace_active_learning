@@ -75,6 +75,7 @@ section() {
 ROUND=""
 FOUNDATION=""
 TRAINING_PATH=""
+RESTART=""
 # 2. Parse command line arguments (e.g., bash train_active.sh --round 2)
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
@@ -90,6 +91,10 @@ while [[ "$#" -gt 0 ]]; do
             TRAINING_PATH="$2"
             shift 2 
             ;;
+        --restart)
+            RESTART=true
+            shift 1
+            ;;
         -h|--help)
             echo "Usage: $0 --round [number] --foundation [path] --training [path]"
             exit 0
@@ -101,6 +106,11 @@ while [[ "$#" -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ -z "$ROUND" ]]; then
+    echo "Error: --round parameter is required."
+    exit 1
+fi
 
 # 3. Dynamic Foundation Model Selection
 # Logic: If Round 1, use base mace-mp. If Round > 1, use 'final.model' from Round-1
@@ -122,8 +132,10 @@ else
     log_info "User provided explicit foundation model: $FOUNDATION"
 fi
 
-# Training data produced by active_pipeline.py --parse
-# Change to master train pool round 2 and onwards.
+if [[ "$RESTART" == "true" ]]; then
+    log_info "Restart flag enabled: Will append '--restart_latest' to mace_run_train."
+fi
+
 if [[ -z "$TRAINING_PATH" ]]; then
     TRAINING_PATH="${MACE_TRAINING_PATH}"
 fi
@@ -144,7 +156,7 @@ SWA_START="${SWA_START:-1}"
 PATIENCE="${PATIENCE:-70}"
 R_MAX="${R_MAX:-5.0}"
 NUM_SAMPLES_PT="${NUM_SAMPLES_PT:-0}"   # Materials Project frames to mix in during multi-head training
-FLOAT_TYPE="${FLOAT_TYPE:-float32}"
+FLOAT_TYPE="${FLOAT_TYPE:-float64}"
 
 # Weights
 FORCES_WEIGHT="${FORCES_WEIGHT:-100}"
@@ -242,6 +254,11 @@ echo "  Model name: $MODEL_NAME"
 echo "  Foundation: $FOUNDATION"
 section "Begin Training"
 
+RESTART_FLAG=""
+if [[ "$RESTART" == "true" ]]; then
+    RESTART_FLAG="--restart_latest"
+fi
+
 mace_run_train \
     --name="$MODEL_NAME" \
     --foundation_model="$FOUNDATION" \
@@ -273,9 +290,9 @@ mace_run_train \
     --multiheads_finetuning=True \
     --pt_train_file="mp" \
     --num_samples_pt="$NUM_SAMPLES_PT" \
-    --num_workers=4 \
     --pin_memory=True \
-    --device=cuda 
+    --device=cuda \
+    $RESTART_FLAG 2>&1 | tee -a "$TRAIN_LOG" 
 
 train_exit=${PIPESTATUS[0]}
 
