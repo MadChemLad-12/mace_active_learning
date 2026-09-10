@@ -46,6 +46,7 @@ export R_MAX=5.0
 export NUM_SAMPLES_PT=0   # Materials Project frames to mix in during multi-head training
 export FLOAT_TYPE="float32"
 
+export RESTART=false  #  true or false all lower case
 # Weights
 export FORCES_WEIGHT=100
 export ENERGY_WEIGHT=1
