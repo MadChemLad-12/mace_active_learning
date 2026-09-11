@@ -10,10 +10,10 @@ from dataclasses import dataclass
 @dataclass
 class CheckResidualConfig:
     apply_d3: bool = False          # apply D3 correction to MACE energies
-    max_force_ref: float = 100.0    # eV/Å, max force for a structure to be valid
-    max_rmse: float = 1010.0       # meV/Å, max RMSE force for a structure to be valid
+    max_force_ref: float = 15.0    # eV/Å, max force for a structure to be valid 45
+    max_rmse: float = 800.0       # meV/Å, max RMSE force for a structure to be valid
     non_pt_thresh: float = 5.3     # Å, z-height threshold for non-Pt atoms entering slab
-    max_count: int = 400           # max atom count allowed in a system
+    max_count: int = 800           # max atom count allowed in a system
     
     device: str = "cuda"             # device for MACE calculations (cuda or cpu)
     dtype: str = "float64"           # dtype for MACE calculations (float32 or float64)
@@ -50,13 +50,13 @@ class CheckResidualConfig:
         cohesive = (E_total - sum(E0_ref)) / n_atoms, eV/atom
         """
         if   "Pt" in symbols_set and pt_count > 3:           # Pt slab
-            rmse_thresh = 1000
+            rmse_thresh = 800
         elif "P" in symbols_set or "N" in symbols_set:
-            rmse_thresh = 1000
+            rmse_thresh = 800
         elif set(symbols_set) <= {"H", "O"}:                      # bulk water
             rmse_thresh = 600
         elif any(s in symbols_set for s in ("F", "S")):      # Nafion
-            rmse_thresh = 1000
+            rmse_thresh = 800
         else:                                                 # dissolved Pt / fallback
             rmse_thresh = CONFIG.max_rmse
         return rmse_thresh
