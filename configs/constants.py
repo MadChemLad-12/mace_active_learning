@@ -24,7 +24,7 @@ FOUNDATION_MODEL_PATH="/home/h.jack/MACE_train/mace_active_learning/mace-mpa-0-m
 FINETUNED_MODEL_PATH="/home/h.jack/MACE_train/mace_active_learning/mace_V8_active_learning_stagetwo.model"
 
 # --- Atomic number mapping ---
-Z_MAP = {"H": 1, "Li": 3, "C": 6, "O": 8, "F": 9, "P": 15, "S": 16, "Pt": 78}
+Z_MAP = {"H": 1, "C": 6, "O": 8, "F": 9, "S": 16, "Pt": 78}
 
 # --- Elements treated as metals (affects e.g. slab-height triage logic) ---
 METALS = {"Pt", "Li"}  # extend if other transition metals are added later
