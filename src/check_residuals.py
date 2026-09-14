@@ -118,6 +118,8 @@ else:
     print(f"No new model found using foundational")
     mace_path=FOUNDATION_MODEL_PATH
 
+print(f"Using model {mace_path}")
+
 from mace.calculators import MACECalculator
 calc_mace = MACECalculator(
     model_paths=mace_path,
@@ -217,7 +219,7 @@ for index, atoms in enumerate(unique_frames):
     e_ref    = sum(E0s_ref[z] for z in atoms.numbers)
     coh      = (e_total - e_ref) / len(atoms)
 
-    coh_lo, coh_hi = get_residual_bounds(symbols_set, pt_count)
+    coh_lo, coh_hi = get_residual_bounds(symbols_set, pt_count, stype)
     if not (coh_lo < coh < coh_hi):
         bad.append(atoms)
         bad_info.append(f"[cohesive_energy] {stype} index={index} "
@@ -231,7 +233,7 @@ for index, atoms in enumerate(unique_frames):
     if max_f_ref > MAX_FORCE_REF:
         bad.append(atoms)
         bad_info.append(f"[ref_force_too_large] {stype} index={index} "
-                        f"max_ref_F={max_f_ref:.2f} eV/Å")
+                        f"max_ref_F={max_f_ref:.2f} eV/Å (threshold={MAX_FORCE_REF})")
         continue
 
     # ── 4. MACE force RMSE check (system-aware) ───────────────────────────────
@@ -245,7 +247,7 @@ for index, atoms in enumerate(unique_frames):
     rmse     = np.sqrt(np.mean((mace_f - ref_f)**2)) * 1000
     max_mace = np.max(np.linalg.norm(mace_f, axis=1))
 
-    rmse_thresh = get_force_bounds(symbols_list, pt_count)
+    rmse_thresh = get_force_bounds(symbols_list, pt_count, stype)
     if rmse > rmse_thresh:
         bad.append(atoms)
         bad_info.append(f"[high_rmse] {stype} index={index} "
