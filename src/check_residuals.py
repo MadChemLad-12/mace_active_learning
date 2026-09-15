@@ -164,6 +164,8 @@ else:
 
 VERIFICATION_MODEL_NAME = Path(mace_path).stem
 
+print(f"Using model {mace_path}")
+
 from mace.calculators import MACECalculator
 calc_mace = MACECalculator(
     model_paths=mace_path,
@@ -294,7 +296,7 @@ for index, atoms in enumerate(unique_frames):
     # (get_residual_bounds), deliberately separate from the coarser
     # coh_ok flag the pipeline stamped at parse time (get_coh_bounds) —
     # do not treat coh_ok as a substitute for this check.
-    coh_lo, coh_hi = get_residual_bounds(symbols_set, pt_count)
+    coh_lo, coh_hi = get_residual_bounds(symbols_set, pt_count, stype)
     if not (coh_lo < coh < coh_hi):
         bad.append(atoms)
         atoms.info["curation_status"] = "bad"
@@ -314,7 +316,7 @@ for index, atoms in enumerate(unique_frames):
         atoms.info["curation_status"] = "bad"
         atoms.info["curation_reason"] = "ref_force_too_large"
         bad_info.append(f"[ref_force_too_large] {stype} index={index} model={labeling_model} "
-                        f"max_ref_F={max_f_ref:.2f} eV/Å")
+                        f"max_ref_F={max_f_ref:.2f} eV/Å (threshold={MAX_FORCE_REF})")
         continue
 
     # ── 4. MACE force RMSE check (system-aware) ───────────────────────────────
@@ -331,7 +333,7 @@ for index, atoms in enumerate(unique_frames):
     rmse = np.sqrt(np.mean((mace_f - ref_f) ** 2)) * 1000
     max_mace = np.max(np.linalg.norm(mace_f, axis=1))
 
-    rmse_thresh = get_force_bounds(symbols_list, pt_count)
+    rmse_thresh = get_force_bounds(symbols_list, pt_count, stype)
     if rmse > rmse_thresh:
         bad.append(atoms)
         atoms.info["curation_status"] = "bad"

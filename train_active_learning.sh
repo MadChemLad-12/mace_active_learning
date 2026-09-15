@@ -204,7 +204,7 @@ FINAL_MODEL="${MODEL_NAME}_final.model"
 TRAIN_LOG="train_V${ROUND}_${timestamp}.log"
 SUMMARY_LOG="training_summary_${timestamp}.log"
 ERROR_LOG="training_errors_${timestamp}.log"
-EVAL_OUTPUT="results_V${ROUND}_${timestamp}.xyz"
+EVAL_OUTPUT="results/results_V${ROUND}_${timestamp}.xyz"
 PLOT_PREFIX="plot_V${ROUND}_${timestamp}"
 
 # =============================================================================
@@ -351,6 +351,8 @@ else
 
     eval_exit=${PIPESTATUS[0]}
 
+    python analysis/eval_mace_results.py --xyz "$EVAL_OUTPUT" --out_dir results/
+    
     if [[ $eval_exit -ne 0 ]]; then
         log_error "EVAL" "mace_eval_configs" \
             "Evaluation failed (exit $eval_exit). Parity plots will be skipped."
