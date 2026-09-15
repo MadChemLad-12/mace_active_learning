@@ -71,3 +71,5 @@ settings.json
 launch.json
 dump_env.sh
 data/
+results/mace_V8_active_learning_run-123_train.txt
+mace_V8_active_learning_valid_indices_123.txt
