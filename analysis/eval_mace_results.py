@@ -23,7 +23,7 @@ ENERGY_REF_KEY = "REF_energy"
 ENERGY_PRED_KEY = "MACE_energy"
 FORCES_REF_KEY = "REF_forces"
 FORCES_PRED_KEY = "MACE_forces"
-CONFIG_TYPE_KEY = "system_type"  # Change to "system_type" if needed
+CONFIG_TYPE_KEY = "system_type"  
 # ----------------------------------------------------------------------
 
 

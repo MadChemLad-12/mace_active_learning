@@ -292,6 +292,7 @@ mace_run_train \
     --num_samples_pt="$NUM_SAMPLES_PT" \
     --pin_memory=True \
     --device=cuda \
+    --seed 421 \
     $RESTART_FLAG 2>&1 | tee -a "$TRAIN_LOG" 
 
 train_exit=${PIPESTATUS[0]}

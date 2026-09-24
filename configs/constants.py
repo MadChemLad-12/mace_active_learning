@@ -37,7 +37,7 @@ IONIC_SPECIES_CHARGE = {
 }
 
 # --- Location of training files ---
-CLEAN_TRAIN  = "training_clean.xyz"
+CLEAN_TRAIN  = "training_clean_v2.xyz"
 BAD_TRAIN    = "training_bad.xyz"
 MASTER_TRAIN = "master_train_pool.xyz"
 HELD_OUT     = "held_out.xyz"
