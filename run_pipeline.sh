@@ -143,7 +143,7 @@ R=1
 EXCLUDE_KEYWORDS=""   # set to "" to disable
 GEO_OPT_RUN="True"    # set to True if you want to run geometry optimizations
 SKIP_NEB="False"      # set NEB to True if you want to skip NEB calculations
-SKIP_AIMD="False"      # set AIMD to True if you want to run AIMD simulations
+SKIP_AIMD="True"      # set AIMD to True if you want to run AIMD simulations
 SKIP_PLM="True" ### Plumed is not working yet, so we skip it for now
         
 PIPELINE_RUN="True"   # set to True if you want to generate cp2k inputs
