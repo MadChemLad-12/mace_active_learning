@@ -64,7 +64,6 @@ from configs.round_configs.schema import ActivePipelineConfig, get_coh_bounds
 # Configuration
 # ============================================================
 ROUND = None
-
 _FOUNDATION_MODEL = FOUNDATION_MODEL_PATH
 MODEL_PATH = None
 # Output paths
@@ -88,8 +87,7 @@ def apply_round(n: int, custom_model_path: str = None):
     # Model path resolution logic
     if custom_model_path is not None:
         MODEL_PATH = custom_model_path
-    elif ROUND > 3:
-        MODEL_PATH = f"mace_V{ROUND-1}_active_learning_stagetwo.model"
+    
     else:
         MODEL_PATH = _FOUNDATION_MODEL
 
@@ -245,6 +243,7 @@ def load_candidates(al_input_dir):
         frames = read(str(xyz_path), index=":")
         filtered = []
         for atoms in frames:
+            atoms.info["_src"] = xyz_path.stem
             if "system_type" not in atoms.info:
                 atoms.info["system_type"] = xyz_path.stem
             if _is_excluded(atoms.info["system_type"], config=CONFIG):
@@ -343,8 +342,8 @@ CP2K_TEMPLATE = """\
     BASIS_SET_FILE_NAME {libdir}/BASIS_MOLOPT
     POTENTIAL_FILE_NAME {libdir}/GTH_POTENTIALS
     &MGRID
-      CUTOFF 500
-      REL_CUTOFF 50
+      CUTOFF 400
+      REL_CUTOFF 40
       NGRIDS 4
     &END MGRID
     &QS
@@ -1755,8 +1754,11 @@ def relax_pathological_frames(frames, calc, config: ActivePipelineConfig):
     fmax_target   = config.geoopt_fmax_target
     
     for atoms in frames:
+        if atoms.info.get("ts_forced"):
+            continue
         atoms_copy = atoms.copy()
         atoms_copy.calc = calc
+        
         try:
             f0 = atoms_copy.get_forces()
         except Exception as e:
@@ -1882,95 +1884,40 @@ def _resolve_reico_charge_state(atoms, name):
 # ============================================================
 from mace.calculators import MACECalculator 
 def run_round(config: ActivePipelineConfig):
-    """Load MACE candidate files, select uncertain frames, write CP2K inputs."""
+    """Load MACE candidate files, select frames by committee disagreement
+    (plus forced NEB transition-state images), write CP2K inputs."""
+    global MODEL_PATH
+    from src.al_selection import load_committee, select_by_committee
+
     print(f"\n{'='*60}")
     print(f"  Active Learning Round {config.round}")
-    print(f"  Model: {_FOUNDATION_MODEL}")
+    print(f"  Committee: {'ON' if config.use_committee else 'OFF (single model)'}")
+    for p in config.committee_models:
+        print(f"    {p}")
     print(f"{'='*60}\n")
-    skipped_unphysical = 0
 
     # ---- NEB / GeoOpt candidates ----
     all_candidates = load_candidates(AL_INPUT_DIR)
-
-    print(f"\n[→] Re-scoring {len(all_candidates)} NEB/GeoOpt frames with MACE...")
-    all_candidates = rescore_with_mace(all_candidates, _FOUNDATION_MODEL, config)
-
     geom_index = _load_geometry_index(CP2K_DIR) if config.reuse_existing_cp2k else {}
 
     def _already_computed(atoms):
-        geom_hash = get_atoms_hash(atoms)
-        entry = geom_index.get(geom_hash)
-        if entry:
-            out = Path(entry["cp2k_dir"]) / f"{entry['name']}.out"
-            if _cp2k_output_is_complete(out):
-                return True
-        return False
+        entry = geom_index.get(get_atoms_hash(atoms))
+        return bool(entry) and _cp2k_output_is_complete(
+            Path(entry["cp2k_dir"]) / f"{entry['name']}.out")
 
-    print("\nScoring all candidates by MACE max force...")
-    scored = []
-    for atoms in all_candidates:
-        if atoms.calc is not None:
-            try:
-                f = atoms.get_forces()
-                score = float(np.max(np.linalg.norm(f, axis=1)))
-            except Exception:
-                f, score = None, 0.0
-        else:
-            f, score = None, 0.0
-        scored.append((score, atoms, f))
+    calcs = load_committee(config)
+    print(f"[→] Loaded {len(calcs)} MACE model(s) for committee scoring.")
+    calc = calcs[0]   # used by the external-dataset, REICO and relaxation steps below
+    # Provenance: record a model that actually took part in the scoring
+    MODEL_PATH = config.committee_models[0]
+    print(f"[→] Provenance: MODEL_PATH set to {MODEL_PATH}")
 
-    scored.sort(key=lambda x: x[0], reverse=True)
+    selected = select_by_committee(
+        all_candidates, calcs, config, _already_computed,
+        hash_fn=get_atoms_hash, soap_fn=build_soap_features,
+        phys_check=lambda a, c: is_physically_reasonable(a, c, round_num=config.round))
 
-    selected = []
-    skipped_computed = 0
-    skipped_seen = set()
-    n_select_total = config.n_select_total
-    print(f"\n[→] Selecting up to {n_select_total} frames that need CP2K...")
-
-    calc_mace = MACECalculator(model_paths=_FOUNDATION_MODEL, device=config.device, default_dtype=config.dtype)
-    if config.apply_d3:
-        print(f"  [→] D3 dispersion correction will be applied to MACE scores.")
-        calc_DFT = TorchDFTD3Calculator(
-                    device=config.device,
-                    damping="bj",
-                    xc=cfg.get("dispersion_xc", "pbe"),
-                    cutoff=cfg.get("dispersion_cutoff", 40.0),
-                )
-        calc = SumCalculator([calc_mace, calc_DFT])
-    else:
-        print(f"  [→] No D3 dispersion correction applied to MACE scores.")
-        calc = calc_mace
-
-    for score, atoms, forces in scored:
-        if len(selected) >= n_select_total:
-            break
-        geom_hash = get_atoms_hash(atoms)
-        if geom_hash in skipped_seen:
-            continue
-        if _already_computed(atoms):
-            skipped_computed += 1
-            continue
-        is_ok, reason = is_physically_reasonable(atoms, calc, round_num=config.round, forces=forces)
-        if not is_ok:
-            print(f"  [✗] Skipped (unphysical): {atoms.info.get('system_type','?')}  — {reason}")
-            skipped_unphysical += 1
-            continue
-        skipped_seen.add(geom_hash)
-        selected.append(atoms)
-        print(f"  [+] Selected frame {len(selected):3d}/{n_select_total}  "
-              f"score={score:.3f} eV/Å  system={atoms.info.get('system_type','?')}")
-
-    print(f"\n  [✓] Selected {len(selected)} frames for CP2K "
-          f"    {skipped_computed} already-computed geometries skipped"
-          f"    Unphysical/noisy : {skipped_unphysical}"
-          f"    Remaining pool   : {len(scored) - len(selected) - skipped_computed - skipped_unphysical}")
-
-    if len(selected) < n_select_total:
-        print(f"  [!] Warning: only found {len(selected)} new frames — "
-              f"  candidate pool may be exhausted.")
-
-    # --- External datasets: bool flag gates whether we run this block at all,
-    # the actual per-source settings live in config.external_sources ---
+    # ---- External datasets (not committee-scored; FPS-sampled by design) ----
     if config.external_datasets:
         print(f"\n[→] Sampling external dataset structures for CP2K recalculation...")
         for src_name, src_cfg in config.external_sources.items():
@@ -1996,8 +1943,7 @@ def run_round(config: ActivePipelineConfig):
             n_rejected = 0
             for atoms in sampled:
                 is_ok, reason = is_physically_reasonable(
-                    atoms, calc, round_num=config.round, check_slab_z=False
-                )
+                    atoms, calc, round_num=config.round, check_slab_z=False)
                 if is_ok:
                     screened.append(atoms)
                 else:
@@ -2007,9 +1953,11 @@ def run_round(config: ActivePipelineConfig):
             print(f"  [✓] {src_name}: added {len(screened)} frames "
                   f"({n_rejected} rejected) (total: {len(selected)})")
 
+    # ---- REICO random imaginary-chemical boxes ----
     if config.reico_sampling:
         print(f"\n[→] REICO: generating {config.reico_num} random imaginary-chemical boxes...")
-        unique_elements = sorted(set(sym for atoms in selected for sym in atoms.get_chemical_symbols()))
+        unique_elements = sorted(set(sym for atoms in selected
+                                     for sym in atoms.get_chemical_symbols()))
         print(f"Creating REICO samples with {unique_elements}")
         if not unique_elements:
             print("  [!] REICO: no elements found in selected pool yet, skipping.")
@@ -2017,9 +1965,10 @@ def run_round(config: ActivePipelineConfig):
             reico_frames = []
             n_failed = 0
             for _ in range(config.reico_num):
-                n_atoms = int(np.random.randint(config.reico_min_atoms, config.reico_max_atoms + 1))
+                n_atoms = int(np.random.randint(config.reico_min_atoms,
+                                                config.reico_max_atoms + 1))
                 try:
-                    box = create_random_box(unique_elements, n_atoms, config=CONFIG)
+                    box = create_random_box(unique_elements, n_atoms, config=config)
                 except ValueError as e:
                     n_failed += 1
                     print(f"    [!] REICO: {e}")
@@ -2027,11 +1976,13 @@ def run_round(config: ActivePipelineConfig):
                 box.info["system_type"] = "reico_random"
                 _resolve_reico_charge_state(box, box.info["system_type"])
                 reico_frames.append(box)
-            print(f"  [✓] REICO: generated {len(reico_frames)}/{config.reico_num} boxes ({n_failed} failed)")
+            print(f"  [✓] REICO: generated {len(reico_frames)}/{config.reico_num} "
+                  f"boxes ({n_failed} failed)")
             reico_frames = relax_pathological_frames(reico_frames, calc, config=config)
             n_rejected = 0
             for box in reico_frames:
-                is_ok, reason = is_physically_reasonable(box, calc, round_num=config.round, check_slab_z=False)
+                is_ok, reason = is_physically_reasonable(
+                    box, calc, round_num=config.round, check_slab_z=False)
                 if is_ok:
                     selected.append(box)
                 else:
@@ -2044,11 +1995,13 @@ def run_round(config: ActivePipelineConfig):
     for atoms in selected:
         atoms.calc = None
 
+    # ---- Pre-CP2K triage (TS-forced frames are skipped inside this function) ----
     if config.geoopt_trigger:
         print(f"\n[→] Pre-CP2K triage: checking for pathological initial forces "
               f"(trigger > {config.geoopt_trigger_force} eV/Å)...")
         selected = relax_pathological_frames(selected, calc, config=config)
 
+    # ---- E0 inputs ----
     e0_inputs = []
     if not os.path.exists(E0_JSON):
         elements_needed = set()
@@ -2057,7 +2010,9 @@ def run_round(config: ActivePipelineConfig):
         print(f"\n[→] {E0_JSON} not found. Generating E0 inputs for: {elements_needed}")
         e0_inputs = generate_e0s_input(sorted(elements_needed), config.e0_dir)
 
-    write_all_sp_inputs(selected, CP2K_DIR, config=CONFIG, ignore_names=CONFIG.exclude_system_keywords)
+    # ---- Write CP2K inputs + selected-frames file ----
+    write_all_sp_inputs(selected, CP2K_DIR, config=config,
+                        ignore_names=config.exclude_system_keywords)
 
     selected_path = f"al_selected_round{config.round}.xyz"
     write(selected_path, selected, format="extxyz")
@@ -2076,7 +2031,7 @@ def run_round(config: ActivePipelineConfig):
     print(f"  2. Parse:     python active_pipeline.py --parse")
     print(f"  3. Re-try failed jobs, then:  python active_pipeline.py --reparse")
     print(f"  4. Retrain:   copy round{config.round}_active_pipeline.py to "
-          f"round{config.round+1}_active_pipeline.py, then run train_multiple.sh") 
+          f"round{config.round+1}_active_pipeline.py, then run train_multiple.sh")
  
 def parse_and_update():
     """Call after CP2K jobs finish: parse outputs, write MACE training data."""
@@ -2826,7 +2781,7 @@ if __name__ == "__main__":
 
     print("="*60)
     print(f"  Active Learning Round {CONFIG.round}")
-    print(f"  Model: {_FOUNDATION_MODEL}")
+    print(f"  Foundation Model: {_FOUNDATION_MODEL}")
     print(f"  CP2K dir: {CP2K_DIR}")
     print(f"  E0 dir: {E0_DIR}")
     print(f"  Max atoms: {CONFIG.max_atoms}")
