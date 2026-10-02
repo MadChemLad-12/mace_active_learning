@@ -1,6 +1,6 @@
 """
-Round 6 config -- src/check_residual.py
-Copy forward to round7_check_residual.py and diff against this one.
+Round 1 config -- src/check_residual.py
+Copy forward to round2_check_residual.py and diff against this one.
 
 """
 

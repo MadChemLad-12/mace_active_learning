@@ -1,6 +1,6 @@
 ### Default values to enable parsing in VSCODE
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 class ActivePipelineConfig:
     # --- General ---
@@ -37,12 +37,30 @@ class ActivePipelineConfig:
 
     # --- REICO (random imaginary-chemical box) sampling ---
     reico_sampling: bool = True
-    reico_num: int = 50                # random boxes generated per round
+    reico_num: int = 10               # random boxes generated per round
     reico_min_atoms: int = 20
     reico_max_atoms: int = 60
-    reico_vol_per_atom: float = 12.0   # Å³/atom, condensed-phase packing density
-    reico_min_dist_scale: float = 0.6  # scales (r_cov_a + r_cov_b) per-pair min distance
+    reico_vol_per_atom: float = 7.0   # Å³/atom, condensed-phase packing density
+    reico_min_dist_scale: float = 1.2   # scales (r_cov_a + r_cov_b) per-pair min distance
 
+    # --- Committee_models ---
+    use_committee: bool = True
+    committee_models: List[str] = field(default_factory=list)
+    committee_head: Optional[str] = "Default"  # must exist in every listed model
+    ts_neighbors: int = 1           # Number of neighbors to use for the TS uncertainty metric (default: 1)
+    dev_lo: Optional[float] = None   # absolute eV/A, optional
+    dev_hi: Optional[float] = None   # absolute eV/A, optional
+    dev_lo_pct: float = 50.0         # percentile window used when dev_lo/dev_hi are None
+    dev_hi_pct: float = 98.0
+    fps_pool_factor: int = 3        # Factor to multiply the number of candidates to select from for FPS selection (default: 3)
+        
+    # --- List of models to use for the committee (if committee_on is True) ---
+    committee_model1: str = "/home/user/Documents/Programs/Python/ASE/MACE/active_learning/mace_V8_active_learning_stagetwo.model"
+    committee_model2: str = "/home/user/Documents/Programs/Python/ASE/MACE/active_learning/mace_V5_active_learning_stagetwo.model"
+    committee_model3: str = "/home/user/Documents/Programs/Python/ASE/MACE/active_learning/mace_V6_active_learning_stagetwo.model"
+    # committee_model4: str = , ... etc. Add more models as needed
+    # If not using the committee you can set committee_on to False and use a the First one listed here.  
+    
     @property
     def e0_dir(self) -> str:
         # Depends on `round`, so this is a property rather than a plain field --
