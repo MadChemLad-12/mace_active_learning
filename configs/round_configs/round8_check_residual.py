@@ -1,6 +1,6 @@
 """
-Round 6 config -- src/check_residual.py
-Copy forward to round1_check_residual.py and diff against this one.
+Round 1 config -- src/check_residual.py
+Copy forward to round2_check_residual.py and diff against this one.
 
 """
 
@@ -14,9 +14,10 @@ class CheckResidualConfig:
     max_rmse: float = 350.0       # meV/Å, max RMSE force for a structure to be valid
     non_pt_thresh: float = 5.3     # Å, z-height threshold for non-Pt atoms entering slab
     max_count: int = 800           # max atom count allowed in a system
+    max_count: int = 800           # max atom count allowed in a system
     
     device: str = "cuda"             # device for MACE calculations (cuda or cpu)
-    dtype: str = "float32"           # dtype for MACE calculations (float32 or float64)
+    dtype: str = "float64"           # dtype for MACE calculations (float32 or float64)
     
     # --- Residual validation bounds (SCF sanity check on raw CP2K energy) ---
     # cohesive = (E_total - sum(E0_ref)) / n_atoms, eV/atom

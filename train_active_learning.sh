@@ -75,8 +75,8 @@ section() {
 ROUND=""
 FOUNDATION=""
 TRAINING_PATH=""
-RESTART=""
-# 2. Parse command line arguments (e.g., bash train_active.sh --round 2)
+RESTART="false"
+# 2. Parse command line arguments (e.g., bash train_active.sh --round 1)
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --round)
@@ -96,12 +96,12 @@ while [[ "$#" -gt 0 ]]; do
             shift 1
             ;;
         -h|--help)
-            echo "Usage: $0 --round [number] --foundation [path] --training [path]"
+            echo "Usage: $0 --round [number] --foundation [path] --training [path] --restart [restart.pt file]"
             exit 0
             ;;
         *) # Catch-all for unknown arguments
             echo "Error: Unknown option $1"
-            echo "Usage: $0 --round [number] [--foundation path] [--training path]"
+            echo "Usage: $0 --round [number] --foundation [path] --training [path] --restart [restart.pt file]"
             exit 1
             ;;
     esac
@@ -140,7 +140,6 @@ if [[ -z "$TRAINING_PATH" ]]; then
     TRAINING_PATH="${MACE_TRAINING_PATH}"
 fi
 
-
 # Held-out validation set — a fixed set of DFT-labelled frames NOT used in
 # training, used to track model quality across rounds.
 # If you don't have one yet, point this at master_train_pool.xyz as a proxy
@@ -151,21 +150,21 @@ EVAL_CONFIGS="${EVAL_CONFIGS}"
 VALIDATION_FRACTION="${VALIDATION_FRACTION:-0.1}"
 BATCH_SIZE="${BATCH_SIZE:-4}"
 LR="${LR:-0.0001}"
-MAX_EPOCHS="${MAX_EPOCHS:-2}"
-SWA_START="${SWA_START:-1}"
-PATIENCE="${PATIENCE:-70}"
+MAX_EPOCHS="${MAX_EPOCHS:-150}"
+SWA_START="${SWA_START:-100}"
+PATIENCE="${PATIENCE:-30}"
 R_MAX="${R_MAX:-5.0}"
-NUM_SAMPLES_PT="${NUM_SAMPLES_PT:-0}"   # Materials Project frames to mix in during multi-head training
+NUM_SAMPLES_PT="${NUM_SAMPLES_PT:-1000}"   # Materials Project frames to mix in during multi-head training
 FLOAT_TYPE="${FLOAT_TYPE:-float64}"
 
 # Weights
 FORCES_WEIGHT="${FORCES_WEIGHT:-100}"
 ENERGY_WEIGHT="${ENERGY_WEIGHT:-1}"
-STRESS_WEIGHT="${STRESS_WEIGHT:-0}"
+STRESS_WEIGHT="${STRESS_WEIGHT:-1}"
 # SWA weights
-FORCES_SWA="${FORCES_SWA:-100}"
-ENERGY_SWA="${ENERGY_SWA:-5}"
-STRESS_SWA="${STRESS_SWA:-0}"
+FORCES_SWA="${FORCES_SWA:-1000}"
+ENERGY_SWA="${ENERGY_SWA:-10}"
+STRESS_SWA="${STRESS_SWA:-10}"
 
 # Elements present across ALL your systems (atomic numbers)
 # Load JSON E0 values
@@ -250,8 +249,6 @@ log_info "Starting training. Full output → $TRAIN_LOG"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-echo "  Model name: $MODEL_NAME"
-echo "  Foundation: $FOUNDATION"
 section "Begin Training"
 
 RESTART_FLAG=""
@@ -355,8 +352,8 @@ else
     eval_exit=${PIPESTATUS[0]}
 
     python analysis/eval_mace_results.py --xyz "$EVAL_OUTPUT" --out_dir results/
-    python analysis/eval_mace_results.py --data "$TRAINING_PATH" --out results/ --model "$FINAL_MODEL"
-
+    python analysis/per_frame_error.py --data "$TRAINING_PATH" --model "$FINAL_MODEL" --out results/
+    
     if [[ $eval_exit -ne 0 ]]; then
         log_error "EVAL" "mace_eval_configs" \
             "Evaluation failed (exit $eval_exit). Parity plots will be skipped."

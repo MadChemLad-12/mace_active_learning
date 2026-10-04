@@ -70,6 +70,8 @@ config.local.sh
 settings.json
 launch.json
 dump_env.sh
+fps_validate_frames_corrected.xyz
+model_label_index.json
 data/
 mace_*_active_learning_valid_*.txt
 results/mace_*_active_learning_run-*.txt
