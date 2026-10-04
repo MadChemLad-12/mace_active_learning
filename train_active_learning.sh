@@ -355,6 +355,7 @@ else
     eval_exit=${PIPESTATUS[0]}
 
     python analysis/eval_mace_results.py --xyz "$EVAL_OUTPUT" --out_dir results/
+    python analysis/eval_mace_results.py --data "$TRAINING_PATH" --out results/ --model "$FINAL_MODEL"
 
     if [[ $eval_exit -ne 0 ]]; then
         log_error "EVAL" "mace_eval_configs" \
