@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
 """
-select_frames.py
+database_extractor.py  (select_frames.py, cached/chunked version)
 
 Select the most valuable frames from a candidate database to add to
 master_train.xyz, using:
 
   1) Descriptor-based farthest-point sampling (FPS) for structural diversity
-     relative to what's already in master_train.xyz.
-  2) (Optional) Committee disagreement across multiple trained MACE models
-     to rank by predictive uncertainty.
+     relative to what's already in the master set.
+  2) (Optional) Committee disagreement across trained MACE models.
+
 
 Usage
 -----
-# Diversity only (feature 2 off):
-python select_frames.py --database candidates.xyz --master master_train.xyz \
-    --n-select 200 --no-committee
-
-# Diversity + committee disagreement:
-python select_frames.py --database candidates.xyz --master master_train.xyz \
-    --n-select 200 --committee models/v3.model models/v4.model models/v5.model \
-    --device cuda
-
-Notes
+python database_extractor.py --database MB-pol-104607.xyz \
+    --master master_train_pool.xyz --n-select 200 --no-committee \
+    --out structures/ --stride 5 --n-jobs 16 --batch-size 20
+    
+    Notes
 -----
 - Descriptors use dscribe's SOAP. Install with: pip install dscribe --break-system-packages
 - Committee models are loaded via mace.calculators.MACECalculator. Adjust
@@ -29,8 +24,17 @@ Notes
   (e.g. multihead models with a specific head name).
 """
 
+# Keep BLAS/OpenMP single-threaded: parallelism comes from joblib via --n-jobs.
+import os
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
 import argparse
+import hashlib
+import json
+import math
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -38,145 +42,217 @@ from ase.io import read, write
 
 
 # --------------------------------------------------------------------------
-# Descriptor computation (feature 1: diversity / FPS)
+# Cached, chunked SOAP descriptors
 # --------------------------------------------------------------------------
 
-def compute_soap_descriptors(all_atoms, species, r_cut=6.0, n_max=8, l_max=6):
-    """Average per-structure SOAP descriptor for each Atoms object."""
+def _cache_key(path, species, r_cut, n_max, l_max, stride, chunk_size):
+    st = os.stat(path)
+    payload = json.dumps(
+        [str(Path(path).resolve()), st.st_size, st.st_mtime_ns, list(species),
+         r_cut, n_max, l_max, stride, chunk_size],
+        sort_keys=True,
+    )
+    return hashlib.sha1(payload.encode()).hexdigest()[:10]
+
+
+def compute_soap_chunked(atoms_list, species, cache_dir, label,
+                         r_cut, n_max, l_max, chunk_size=1000, n_jobs=1):
+    """
+    Per-structure averaged SOAP, computed chunk by chunk with on-disk caching.
+    Returns a float32 array (n_structures, n_features).
+    """
     from dscribe.descriptors import SOAP
 
-    soap = SOAP(
-        species=species,
-        periodic=True,
-        r_cut=r_cut,
-        n_max=n_max,
-        l_max=l_max,
-        average="inner",  # one averaged descriptor per structure
-    )
-    descriptors = soap.create(all_atoms, n_jobs=1)
-    return np.asarray(descriptors, dtype=np.float32)
+    n = len(atoms_list)
+    if n == 0:
+        return np.empty((0, 0), dtype=np.float32)
 
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-def greedy_fps(candidate_descs, reference_descs, n_select):
-    """
-    Greedy farthest-point sampling.
+    soap = SOAP(species=species, periodic=True, r_cut=r_cut,
+                n_max=n_max, l_max=l_max, average="inner")
 
-    Selects candidate indices that maximize the minimum distance to the
-    reference set (master_train.xyz) union previously-selected candidates.
-    Returns indices into candidate_descs, ordered by selection order
-    (most valuable first).
-    """
-    n_candidates = candidate_descs.shape[0]
-    if reference_descs.shape[0] > 0:
-        # min distance from each candidate to the reference set
-        min_dists = _min_dist_to_set(candidate_descs, reference_descs)
-    else:
-        min_dists = np.full(n_candidates, np.inf)
+    n_chunks = math.ceil(n / chunk_size)
+    t0 = time.time()
+    computed = 0
+    for c in range(n_chunks):
+        s, e = c * chunk_size, min((c + 1) * chunk_size, n)
+        path = cache_dir / f"chunk_{c:05d}.npy"
 
-    selected = []
-    selected_mask = np.zeros(n_candidates, dtype=bool)
+        # reuse a valid cached chunk
+        if path.exists():
+            try:
+                if np.load(path, mmap_mode="r").shape[0] == e - s:
+                    continue
+            except Exception:
+                pass  # corrupt/partial -> recompute
 
-    n_select = min(n_select, n_candidates)
-    for _ in range(n_select):
-        # pick the candidate currently farthest from reference+selected
-        remaining = np.where(~selected_mask)[0]
-        if remaining.size == 0:
-            break
-        best_local = remaining[np.argmax(min_dists[remaining])]
-        selected.append(best_local)
-        selected_mask[best_local] = True
+        desc = np.asarray(soap.create(atoms_list[s:e], n_jobs=n_jobs), dtype=np.float32)
+        tmp = cache_dir / f"chunk_{c:05d}.tmp.npy"
+        np.save(tmp, desc)
+        os.replace(tmp, path)  # atomic: no half-written chunks
 
-        # update min_dists with distance to the newly selected point
-        new_dists = np.linalg.norm(
-            candidate_descs - candidate_descs[best_local], axis=1
+        computed += 1
+        elapsed = time.time() - t0
+        remaining_chunks = sum(
+            1 for k in range(c + 1, n_chunks)
+            if not (cache_dir / f"chunk_{k:05d}.npy").exists()
         )
-        min_dists = np.minimum(min_dists, new_dists)
-        min_dists[best_local] = -np.inf  # never reselect
+        eta = elapsed / computed * remaining_chunks
+        print(f"  [{label}] chunk {c + 1}/{n_chunks} done "
+              f"({e}/{n} frames) elapsed {elapsed / 60:.1f} min, ETA {eta / 60:.1f} min",
+              flush=True)
 
-    return selected
-
-
-def _min_dist_to_set(query_descs, ref_descs, chunk=200, ref_chunk=2000):
-    """
-    Memory-friendly min pairwise distance from each query to ref set.
-
-    Uses the expansion |a-b|^2 = |a|^2 + |b|^2 - 2 a.b (via matmul) instead
-    of materializing a (chunk, n_ref, n_features) broadcast array, and
-    chunks over both query and reference sets so memory stays O(chunk *
-    ref_chunk) rather than O(n_query * n_ref * n_features). Everything is
-    float32.
-    """
-    query_descs = np.ascontiguousarray(query_descs, dtype=np.float32)
-    ref_descs = np.ascontiguousarray(ref_descs, dtype=np.float32)
-
-    n = query_descs.shape[0]
-    out = np.full(n, np.inf, dtype=np.float32)
-
-    ref_sq = np.einsum("ij,ij->i", ref_descs, ref_descs)  # (n_ref,)
-
-    for q_start in range(0, n, chunk):
-        q_end = min(q_start + chunk, n)
-        q_block = query_descs[q_start:q_end]                # (chunk, d)
-        q_sq = np.einsum("ij,ij->i", q_block, q_block)       # (chunk,)
-
-        block_min = np.full(q_end - q_start, np.inf, dtype=np.float32)
-        for r_start in range(0, ref_descs.shape[0], ref_chunk):
-            r_end = min(r_start + ref_chunk, ref_descs.shape[0])
-            r_block = ref_descs[r_start:r_end]               # (ref_chunk, d)
-
-            # (chunk, ref_chunk)
-            dot = q_block @ r_block.T
-            dist_sq = q_sq[:, None] + ref_sq[None, r_start:r_end] - 2.0 * dot
-            np.maximum(dist_sq, 0.0, out=dist_sq)  # guard tiny negatives from fp error
-            block_min = np.minimum(block_min, dist_sq.min(axis=1))
-
-        out[q_start:q_end] = np.sqrt(block_min)
-
+    # assemble into one preallocated float32 array
+    first = np.load(cache_dir / "chunk_00000.npy", mmap_mode="r")
+    out = np.empty((n, first.shape[1]), dtype=np.float32)
+    for c in range(n_chunks):
+        s, e = c * chunk_size, min((c + 1) * chunk_size, n)
+        out[s:e] = np.load(cache_dir / f"chunk_{c:05d}.npy")
     return out
 
 
 # --------------------------------------------------------------------------
-# Committee disagreement (feature 2: uncertainty, togglable)
+# Farthest-point sampling
+# --------------------------------------------------------------------------
+
+def _min_sqdist_to_set(query, ref, chunk=500, ref_chunk=2000):
+    """Min squared distance from each query row to the ref set (chunked matmul)."""
+    n = query.shape[0]
+    out = np.full(n, np.inf, dtype=np.float32)
+    ref_sq = np.einsum("ij,ij->i", ref, ref)
+    for qs in range(0, n, chunk):
+        qe = min(qs + chunk, n)
+        qb = query[qs:qe]
+        q_sq = np.einsum("ij,ij->i", qb, qb)
+        bmin = np.full(qe - qs, np.inf, dtype=np.float32)
+        for rs in range(0, ref.shape[0], ref_chunk):
+            re_ = min(rs + ref_chunk, ref.shape[0])
+            d2 = q_sq[:, None] + ref_sq[None, rs:re_] - 2.0 * (qb @ ref[rs:re_].T)
+            np.maximum(d2, 0.0, out=d2)
+            bmin = np.minimum(bmin, d2.min(axis=1))
+        out[qs:qe] = bmin
+    return out
+
+
+def greedy_fps(cand, ref, n_select, on_select=None):
+    """
+    Greedy FPS: repeatedly pick the candidate farthest from (reference U selected).
+    Returns candidate indices in selection order. `on_select(idx, dist)` is
+    called as soon as each frame is chosen (used for progressive output).
+    """
+    n = cand.shape[0]
+    cand = np.ascontiguousarray(cand, dtype=np.float32)
+    has_ref = ref.shape[0] > 0
+    if has_ref:
+        ref = np.ascontiguousarray(ref, dtype=np.float32)
+
+    # Centre both sets on the candidate mean: distances are unchanged, but the
+    # |a|^2 + |b|^2 - 2ab expansion loses far less float32 precision.
+    mu = cand.mean(axis=0, dtype=np.float64).astype(np.float32)
+    cand = cand - mu
+    if has_ref:
+        ref = ref - mu
+
+    cand_sq = np.einsum("ij,ij->i", cand, cand)
+    min_d2 = _min_sqdist_to_set(cand, ref) if has_ref else np.full(n, np.inf, dtype=np.float32)
+
+    selected = []
+    for _ in range(min(n_select, n)):
+        best = int(np.argmax(min_d2))
+        if not np.isfinite(min_d2[best]) and min_d2[best] < 0:
+            break  # everything already selected
+        dist = float(np.sqrt(min_d2[best])) if np.isfinite(min_d2[best]) else float("inf")
+        selected.append(best)
+        if on_select is not None:
+            on_select(best, dist)
+
+        d2 = cand_sq - 2.0 * (cand @ cand[best]) + cand_sq[best]
+        np.maximum(d2, 0.0, out=d2)
+        np.minimum(min_d2, d2, out=min_d2)
+        min_d2[best] = -np.inf  # never reselect
+    return selected
+
+
+# --------------------------------------------------------------------------
+# Committee disagreement (optional)
 # --------------------------------------------------------------------------
 
 def compute_committee_disagreement(all_atoms, model_paths, device="cuda"):
-    """
-    Run each committee model on each structure, return per-structure
-    disagreement score = std across models of (energy per atom) combined
-    with mean force-vector std across atoms.
-
-    Returns array of shape (n_structures,) — higher = more disagreement.
-    """
     from mace.calculators import MACECalculator
 
-    calcs = [
-        MACECalculator(model_paths=[p], device=device, float_type="float32") for p in model_paths
-    ]
+    calcs = [MACECalculator(model_paths=[p], device=device, float_type="float32")
+             for p in model_paths]
+    n_models, n_structs = len(calcs), len(all_atoms)
+    e_pa = np.zeros((n_models, n_structs))
+    f_mag = np.zeros((n_models, n_structs))
 
-    n_models = len(calcs)
-    n_structs = len(all_atoms)
-    energies_per_atom = np.zeros((n_models, n_structs))
-    force_std_per_struct = np.zeros((n_models, n_structs))
-
-    for m_idx, calc in enumerate(calcs):
-        for s_idx, atoms in enumerate(all_atoms):
+    for m, calc in enumerate(calcs):
+        for s, atoms in enumerate(all_atoms):
             a = atoms.copy()
             a.calc = calc
-            e = a.get_potential_energy() / len(a)
-            f = a.get_forces()
-            energies_per_atom[m_idx, s_idx] = e
-            force_std_per_struct[m_idx, s_idx] = np.linalg.norm(f, axis=1).mean()
+            e_pa[m, s] = a.get_potential_energy() / len(a)
+            f_mag[m, s] = np.linalg.norm(a.get_forces(), axis=1).mean()
 
-    energy_disagreement = energies_per_atom.std(axis=0)
-    force_disagreement = force_std_per_struct.std(axis=0)
-
-    # normalize each to [0, 1] and combine (equal weight; adjust as needed)
     def _norm(x):
-        rng = x.max() - x.min()
-        return (x - x.min()) / rng if rng > 0 else np.zeros_like(x)
+        r = x.max() - x.min()
+        return (x - x.min()) / r if r > 0 else np.zeros_like(x)
 
-    combined = 0.5 * _norm(energy_disagreement) + 0.5 * _norm(force_disagreement)
-    return combined
+    return 0.5 * _norm(e_pa.std(axis=0)) + 0.5 * _norm(f_mag.std(axis=0))
+
+
+# --------------------------------------------------------------------------
+# Progressive batch output
+# --------------------------------------------------------------------------
+
+class BatchWriter:
+    """
+    Collects selected frames and writes them out `batch_size` at a time, in
+    selection order. If `interval` > 0, waits that many seconds between
+    batches (useful when something downstream picks files up as they appear).
+    """
+
+    def __init__(self, outdir, atoms_list, orig_index, batch_size=20, interval=0.0):
+        self.outdir = Path(outdir)
+        self.outdir.mkdir(parents=True, exist_ok=True)
+        self.atoms_list = atoms_list      # indexable by local index
+        self.orig_index = orig_index      # local index -> index in original database
+        self.batch_size = batch_size
+        self.interval = interval
+        self.buffer = []                  # (local_idx, score)
+        self.rank = 0
+        self.batches = 0
+        self.manifest = self.outdir / "manifest.csv"
+        if not self.manifest.exists():
+            self.manifest.write_text("rank,source_index,score,file\n")
+
+    def add(self, local_idx, score):
+        self.buffer.append((local_idx, score))
+        if len(self.buffer) >= self.batch_size:
+            self.flush()
+
+    def flush(self):
+        if not self.buffer:
+            return
+        if self.batches > 0 and self.interval > 0:
+            print(f"  waiting {self.interval:.0f} s before next batch...", flush=True)
+            time.sleep(self.interval)
+        lines = []
+        for local_idx, score in self.buffer:
+            a = self.atoms_list[local_idx].copy()
+            a.info["source_index"] = int(self.orig_index[local_idx])
+            a.info["selection_rank"] = self.rank
+            fname = f"frame_{self.rank:05d}.xyz"
+            write(self.outdir / fname, a)
+            lines.append(f"{self.rank},{int(self.orig_index[local_idx])},{score:.6g},{fname}\n")
+            self.rank += 1
+        with open(self.manifest, "a") as fh:
+            fh.writelines(lines)
+        self.batches += 1
+        print(f"  wrote batch {self.batches}: frames up to rank {self.rank - 1} "
+              f"-> {self.outdir}", flush=True)
+        self.buffer = []
 
 
 # --------------------------------------------------------------------------
@@ -184,76 +260,108 @@ def compute_committee_disagreement(all_atoms, model_paths, device="cuda"):
 # --------------------------------------------------------------------------
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--database", required=True, help="Path to candidate frames (multi-frame xyz)")
-    p.add_argument("--master", required=True, help="Path to master_train.xyz")
-    p.add_argument("--n-select", type=int, required=True, help="Number of frames to select")
-    p.add_argument("--out", default="selected_frames.xyz", help="Output xyz path")
-    p.add_argument("--split", action="store_true", help="Split output into individual xyz files (one per frame)")
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--database", required=True)
+    p.add_argument("--master", required=True)
+    p.add_argument("--n-select", type=int, required=True)
+    p.add_argument("--out", default="selected_frames.xyz",
+                   help="Output .xyz file, or a directory (no .xyz suffix) for per-frame files.")
+    p.add_argument("--split", action="store_true",
+                   help="With a .xyz --out, also write one file per frame.")
 
     p.add_argument("--r-cut", type=float, default=6.0)
     p.add_argument("--n-max", type=int, default=8)
     p.add_argument("--l-max", type=int, default=6)
 
-    p.add_argument("--committee", nargs="*", default=None,
-                    help="Paths to committee model files (e.g. v3.model v4.model v5.model). "
-                         "Omit or use --no-committee to disable.")
-    p.add_argument("--no-committee", action="store_true",
-                    help="Explicitly disable committee disagreement (feature 2), diversity-only mode.")
-    p.add_argument("--committee-weight", type=float, default=0.5,
-                    help="Blend weight for committee score vs FPS rank when --committee is used (0-1).")
-    p.add_argument("--device", default="cuda", help="cpu or cuda, for committee MACE calculators")
+    p.add_argument("--stride", type=int, default=1,
+                   help="Only consider every Nth candidate frame (MD frames are highly correlated).")
+    p.add_argument("--chunk-size", type=int, default=1000,
+                   help="Frames per SOAP chunk / cache file.")
+    p.add_argument("--n-jobs", type=int, default=os.cpu_count() or 1,
+                   help="Parallel workers for SOAP (default: all cores).")
+    p.add_argument("--cache-dir", default=".soap_cache")
 
-    p.add_argument("--pool-factor", type=int, default=3,
-                    help="When using committee, first FPS-select pool_factor * n_select candidates "
-                         "for diversity, then re-rank that pool by committee disagreement and keep n_select.")
+    p.add_argument("--batch-size", type=int, default=20,
+                   help="Write output in batches of this many frames (directory mode).")
+    p.add_argument("--batch-interval", type=float, default=0.0,
+                   help="Seconds to wait between batches (directory mode). 0 = no pause.")
+
+    p.add_argument("--committee", nargs="*", default=None)
+    p.add_argument("--no-committee", action="store_true")
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--pool-factor", type=int, default=3)
 
     args = p.parse_args()
 
     use_committee = bool(args.committee) and not args.no_committee
     if args.committee and args.no_committee:
-        print("Note: --committee given but --no-committee also set; running diversity-only.", file=sys.stderr)
+        print("Note: --committee given but --no-committee also set; running diversity-only.",
+              file=sys.stderr)
 
     print(f"Reading master training set: {args.master}")
     master_atoms = read(args.master, index=":")
     print(f"  {len(master_atoms)} frames")
 
     print(f"Reading candidate database: {args.database}")
-    candidate_atoms = read(args.database, index=":")
-    print(f"  {len(candidate_atoms)} frames")
+    all_candidates = read(args.database, index=":")
+    print(f"  {len(all_candidates)} frames")
 
-    species = sorted({sym for atoms in (master_atoms + candidate_atoms) for sym in atoms.get_chemical_symbols()})
+    orig_index = np.arange(0, len(all_candidates), args.stride)
+    candidate_atoms = [all_candidates[i] for i in orig_index]
+    del all_candidates
+    if args.stride > 1:
+        print(f"  stride {args.stride}: using {len(candidate_atoms)} candidate frames")
+
+    species = sorted(set().union(*(a.symbols.species() for a in master_atoms + candidate_atoms)))
     print(f"Species: {species}")
 
-    print("Computing SOAP descriptors (this may take a while for large sets)...")
-    master_descs = compute_soap_descriptors(master_atoms, species, args.r_cut, args.n_max, args.l_max) if master_atoms else np.empty((0, 0))
-    candidate_descs = compute_soap_descriptors(candidate_atoms, species, args.r_cut, args.n_max, args.l_max)
+    soap_kw = dict(r_cut=args.r_cut, n_max=args.n_max, l_max=args.l_max,
+                   chunk_size=args.chunk_size, n_jobs=args.n_jobs)
+    root = Path(args.cache_dir)
+
+    print("Computing SOAP descriptors (chunked, cached, resumable)...")
+    mkey = _cache_key(args.master, species, args.r_cut, args.n_max, args.l_max, 1, args.chunk_size)
+    master_descs = compute_soap_chunked(
+        master_atoms, species, root / f"master_{Path(args.master).stem}_{mkey}", "master", **soap_kw)
+    ckey = _cache_key(args.database, species, args.r_cut, args.n_max, args.l_max,
+                      args.stride, args.chunk_size)
+    candidate_descs = compute_soap_chunked(
+        candidate_atoms, species, root / f"db_{Path(args.database).stem}_{ckey}", "database", **soap_kw)
+    print(f"Descriptor matrix: {candidate_descs.shape}, "
+          f"{candidate_descs.nbytes / 1e9:.2f} GB (float32)")
+
+    dir_mode = not args.out.lower().endswith(".xyz")
+    writer = (BatchWriter(args.out, candidate_atoms, orig_index,
+                          args.batch_size, args.batch_interval) if dir_mode else None)
 
     if not use_committee:
         print(f"Diversity-only mode: selecting {args.n_select} frames via greedy FPS.")
-        selected_idx = greedy_fps(candidate_descs, master_descs, args.n_select)
+        cb = (lambda i, d: writer.add(i, d)) if writer else None
+        selected_idx = greedy_fps(candidate_descs, master_descs, args.n_select, on_select=cb)
     else:
         pool_size = min(len(candidate_atoms), args.n_select * args.pool_factor)
-        print(f"Stage 1 (FPS): reducing {len(candidate_atoms)} candidates to a diverse pool of {pool_size}.")
+        print(f"Stage 1 (FPS): reducing {len(candidate_atoms)} candidates to a pool of {pool_size}.")
         pool_idx = greedy_fps(candidate_descs, master_descs, pool_size)
         pool_atoms = [candidate_atoms[i] for i in pool_idx]
 
         print(f"Stage 2 (committee disagreement): scoring pool with models {args.committee}")
         disagreement = compute_committee_disagreement(pool_atoms, args.committee, device=args.device)
+        order = np.argsort(-disagreement)[:min(args.n_select, len(pool_idx))]
+        selected_idx = [pool_idx[i] for i in order]
+        if writer:
+            for i in order:
+                writer.add(pool_idx[i], float(disagreement[i]))
 
-        # rank pool by disagreement, descending (most uncertain = most valuable)
-        order = np.argsort(-disagreement)
-        n_keep = min(args.n_select, len(pool_idx))
-        selected_local = order[:n_keep]
-        selected_idx = [pool_idx[i] for i in selected_local]
-
-        print(f"Selected {len(selected_idx)} frames from committee-ranked pool.")
+    if writer:
+        writer.flush()
 
     selected_atoms = [candidate_atoms[i] for i in selected_idx]
-    write(args.out, selected_atoms)
-    print(f"Wrote {len(selected_atoms)} frames to {args.out}")
-    
-    if args.split:
+    combined = Path(args.out) / "selected_frames.xyz" if dir_mode else Path(args.out)
+    write(combined, selected_atoms)
+    print(f"Wrote {len(selected_atoms)} frames to {combined}")
+
+    if args.split and not dir_mode:
         for i, atoms in enumerate(selected_atoms):
             write(f"{args.out[:-4]}_{i}.xyz", [atoms])
 
