@@ -57,7 +57,7 @@ def parse_cp2k_neb_output(outfile: str) -> dict:
     text = outfile.read_text()
 
     # ── Per-step energy table ──
-    # CP2K prints something like:
+    #  CP2K prints something like:
     #  BAND TOTAL ENERGY [au]:     -1234.5  -1234.4  ...
     step_energies = []
     for line in text.splitlines():
@@ -143,9 +143,10 @@ def compute_reaction_coordinate(atoms_list: list) -> np.ndarray:
 # ─────────────────────────────────────────────
 # 2. MACE EVALUATION
 # ─────────────────────────────────────────────
-
+from configs.round_configs.schema import ActivePipelineConfig
+config = ActivePipelineConfig()
 def evaluate_mace(atoms_list: list, model_path: str,
-                  device: str = "cpu") -> dict:
+                  device: str = config.device) -> dict:
     """
     Run MACE single-point calculations on each replica.
 
@@ -158,7 +159,7 @@ def evaluate_mace(atoms_list: list, model_path: str,
         raise RuntimeError("MACE not installed.")
 
     calc = MACECalculator(model_paths=model_path, device=device,
-                          default_dtype="float64")
+                          default_dtype=config.dtype)
 
     energies, force_arrays, max_forces = [], [], []
     for atoms in atoms_list:
@@ -283,7 +284,7 @@ def main():
     parser.add_argument("--project",     default="",     help="CP2K PROJECT_NAME (for output file naming)")
     parser.add_argument("--mace_model",  default=None,   help="Path to MACE .model file")
     parser.add_argument("--n_replicas",  type=int, default=10)
-    parser.add_argument("--device",      default="cpu",  help="cpu or cuda")
+    parser.add_argument("--device",      default="cuda",  help="cpu or cuda")
     parser.add_argument("--out_dir",     default=".",    help="Output directory")
     args = parser.parse_args()
 

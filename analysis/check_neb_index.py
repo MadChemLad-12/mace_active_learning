@@ -10,13 +10,13 @@ Checks performed per pair:
   3. Element symbols match at every index
   4. Chemical formula matches (catch-all for count differences)
 
-No MACE model is loaded — this is a pure structure check, runs in seconds.
+No MACE model is loaded.
 
 USAGE
 -----
   python check_structure_pairs.py
   python check_structure_pairs.py --csv /path/to/other.csv
-  python check_structure_pairs.py --fix   # suggest proximity-mapping for mismatches
+  python check_structure_pairs.py --fix   # suggest proximity-mapping for mismatches (not great for complex systems)
 """
 
 import argparse
@@ -28,7 +28,7 @@ import numpy as np
 from ase.io import read
 
 # ── Default CSV path — same as neb_geo_run.py ────────────────────────────────
-DEFAULT_CSV = os.environ.get("MACE_DEFAULT_CSV", "PtDissNeb.csv")
+DEFAULT_CSV = os.environ.get("MACE_DEFAULT_CSV")
 
 # ── Colours for terminal output ───────────────────────────────────────────────
 GREEN  = "\033[92m"
