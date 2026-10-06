@@ -4,8 +4,8 @@ from typing import Dict, List, Optional
 
 class ActivePipelineConfig:
     # --- General ---
-    round: int = 8                     # overridden by args.target if provided
-    n_select_total: int = 100          # overridden by args.runs
+    round: int = 9                     # overridden by args.target if provided
+    n_select_total: int = 300          # overridden by args.runs
     max_atoms: int = 580               # cap to avoid oversized GPU jobs
     reuse_existing_cp2k: bool = True   # skip inputs for frames w/ valid CP2K output
     exclude_system_keywords: List[str] = field(default_factory=list)
@@ -55,9 +55,9 @@ class ActivePipelineConfig:
     fps_pool_factor: int = 3        # Factor to multiply the number of candidates to select from for FPS selection (default: 3)
         
     # --- List of models to use for the committee (if committee_on is True) ---
-    committee_model1: str = "/home/user/Documents/Programs/Python/ASE/MACE/active_learning/mace_V8_active_learning_stagetwo.model"
-    committee_model2: str = "/home/user/Documents/Programs/Python/ASE/MACE/active_learning/mace_V5_active_learning_stagetwo.model"
-    committee_model3: str = "/home/user/Documents/Programs/Python/ASE/MACE/active_learning/mace_V6_active_learning_stagetwo.model"
+    committee_model1: str = "/home/h.jack/MACE_train/mace_active_learning/mace_V8_active_learning_stagetwo.model"
+    committee_model2: str = "/home/h.jack/MACE_train/mace_active_learning/mace_V7_active_learning_stagetwo.model"
+    committee_model3: str = "/home/h.jack/MACE_train/mace_active_learning/mace_V5_active_learning_stagetwo.model"
     # committee_model4: str = , ... etc. Add more models as needed
     # If not using the committee you can set committee_on to False and use a the First one listed here.  
     
@@ -71,7 +71,7 @@ class NebGeoRunConfig:
     # --- Device / precision ---
     device: str = "cuda"        # "cuda" or "cpu"
     dtype: str = "float64"      # must match your model's dtype
-    nodes: int = 12              # see note on Singularity + multi-node below
+    nodes: int = 16              # see note on Singularity + multi-node below
 
     # --- Geometry optimisation ---
     fmax: float = 0.05                # eV/Å, force convergence threshold
@@ -111,15 +111,15 @@ def get_coh_bounds(symbols_set: set, pt_count: int) -> tuple:
     cohesive = (E_total - sum(E0_ref)) / n_atoms, eV/atom
     """
     if pt_count > 3:                                          # Pt slab
-        coh_lo, coh_hi = -10.0, 10.0
+        coh_lo, coh_hi = -10.0, 5.0
     elif pt_count > 0:                                        # dissolved Pt
-        coh_lo, coh_hi = -10.0, 10.0
+        coh_lo, coh_hi = -10.0, 5.0
     elif "P" in symbols_set or "N" in symbols_set:
-        coh_lo, coh_hi = -10.0, 10.0
+        coh_lo, coh_hi = -10.0, 5.0
     elif any(s in symbols_set for s in ("F", "S", "C")):       # Nafion-containing
-        coh_lo, coh_hi = -10.0, 10.0
+        coh_lo, coh_hi = -10.0, 5.0
     elif symbols_set <= {"H", "O"}:                            # bulk water
-        coh_lo, coh_hi = -10.0, 10.0
+        coh_lo, coh_hi = -10.0, 5.0
     else:                                                       # fallback
         coh_lo, coh_hi = -10.0, 5.0
     return coh_lo, coh_hi

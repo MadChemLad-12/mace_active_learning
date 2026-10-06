@@ -57,14 +57,14 @@ import importlib
 root_dir = Path(__file__).resolve().parent.parent
 if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
-from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON, MASTER_TRAIN, FOUNDATION_MODEL_PATH, FINETUNED_MODEL_PATH
+from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON, MASTER_TRAIN, FINETUNED_MODEL_PATH, FOUNDATION_MODEL_PATH
 from configs.round_configs.schema import ActivePipelineConfig, get_coh_bounds
 
 # ============================================================
 # Configuration
 # ============================================================
 ROUND = None
-_FOUNDATION_MODEL = FOUNDATION_MODEL_PATH
+_FOUNDATION_MODEL = os.environ.get(FOUNDATION_MODEL_PATH)
 MODEL_PATH = None
 # Output paths
 CP2K_DIR   = None
@@ -86,9 +86,6 @@ def apply_round(n: int, custom_model_path: str = None):
 
     # Model path resolution logic
     if custom_model_path is not None:
-        MODEL_PATH = custom_model_path
-    
-    else:
         MODEL_PATH = _FOUNDATION_MODEL
 
     CP2K_DIR = f"cp2k_sp_round{n}"
@@ -144,21 +141,49 @@ def rescore_with_mace(frames, model_path: str, config: ActivePipelineConfig):
 # always build directly comparable features.
 _SOAP_KWARGS = dict(r_cut=5.0, n_max=8, l_max=5, average="inner", periodic=True)
 
+def _reactive_centers(atoms, pt_pt_cut=3.5, cn_surface=8, bound_cut=2.8):
+    from ase.neighborlist import neighbor_list
+
+    Z = atoms.get_atomic_numbers()
+    is_pt = Z == 78
+    if not is_pt.any():
+        return None
+    i, j, d = neighbor_list("ijd", atoms, cutoff=max(pt_pt_cut, bound_cut))
+
+    pp = is_pt[i] & is_pt[j] & (d < pt_pt_cut)
+    cn = np.bincount(i[pp], minlength=len(atoms))
+    low_pt = np.where(is_pt & (cn < cn_surface))[0]
+
+    heavy_other = (~is_pt) & (Z > 1)
+    bound = is_pt[i] & heavy_other[j] & (d < bound_cut)
+    bound_atoms = np.unique(j[bound])
+
+    centers = np.union1d(low_pt, bound_atoms)
+    return centers.astype(int).tolist() if len(centers) else None
+
+
+def _unit(x):
+    n = np.linalg.norm(x, axis=1, keepdims=True)
+    return x / np.where(n == 0, 1, n)
+
+
 def build_soap_features(frames):
-    """
-    Compute one normalised SOAP vector per frame.
-    Rotation/translation/permutation invariant, unlike flattened positions —
-    see the earlier discussion on why raw-position FPS was misleading FPS
-    into treating rotated/reindexed duplicates as maximally diverse.
-    """
     from dscribe.descriptors import SOAP
 
-    species = sorted(set(sym for atoms in frames for sym in atoms.get_chemical_symbols()))
+    species = sorted({s for a in frames for s in a.get_chemical_symbols()})
     soap = SOAP(species=species, **_SOAP_KWARGS)
-    features = soap.create(frames, n_jobs=-1)
+    n_jobs = max(1, (os.cpu_count() or 2) - 1)   # n_jobs=-1 raises on a 1-CPU machine
 
-    norms = np.linalg.norm(features, axis=1, keepdims=True)
-    return features / np.where(norms == 0, 1, norms)
+    glob = _unit(np.atleast_2d(soap.create(frames, n_jobs=n_jobs)))
+    local = np.zeros_like(glob)
+
+    centers = [_reactive_centers(a) for a in frames]
+    idx = [k for k, c in enumerate(centers) if c is not None]
+    if idx:
+        loc = soap.create([frames[k] for k in idx],
+                          centers=[centers[k] for k in idx], n_jobs=n_jobs)
+        local[idx] = _unit(np.atleast_2d(loc))   # a single frame comes back 1-D
+    return np.hstack([glob, local])
 
 # ============================================================
 # MD trajectory sampler — FPS diversity, NOT force-scored
@@ -278,10 +303,11 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
                 f = atoms.get_forces()
                 scores.append(float(np.max(np.linalg.norm(f, axis=1))))
             except Exception:
+                print(f"  [!] Frame {atoms.info.get('system_type','?')} has no calculator — skipping score.")
                 scores.append(0.0)
-        else:
+        if f == 0.0:
+            print(f"  [!] Frame {atoms.info.get('system_type','?')} has no forces — skipping score.")
             scores.append(0.0)
-
     scores = np.array(scores)
 
     # Pre-filter: prefer frames above threshold, fall back to top-N if too few
@@ -1887,7 +1913,7 @@ def run_round(config: ActivePipelineConfig):
     """Load MACE candidate files, select frames by committee disagreement
     (plus forced NEB transition-state images), write CP2K inputs."""
     global MODEL_PATH
-    from src.al_selection import load_committee, select_by_committee
+    from src.al_selection import load_committee, select_by_committee, ScoreCache, make_cache_tag
 
     print(f"\n{'='*60}")
     print(f"  Active Learning Round {config.round}")
@@ -1905,17 +1931,37 @@ def run_round(config: ActivePipelineConfig):
         return bool(entry) and _cp2k_output_is_complete(
             Path(entry["cp2k_dir"]) / f"{entry['name']}.out")
 
-    calcs = load_committee(config)
-    print(f"[→] Loaded {len(calcs)} MACE model(s) for committee scoring.")
-    calc = calcs[0]   # used by the external-dataset, REICO and relaxation steps below
-    # Provenance: record a model that actually took part in the scoring
-    MODEL_PATH = config.committee_models[0]
+    if config.use_committee:
+        calcs = load_committee(config)
+        model_paths = list(config.committee_models)
+        print(f"[→] Loaded {len(calcs)} MACE model(s) for committee scoring.")
+    else:
+        model_paths = [os.environ["MACE_FOUNDATION_MODEL"]]
+        print("[→] Committee scoring disabled; using single MACE model for scoring.")
+        calc_mace = MACECalculator(model_paths=model_paths[0], device=config.device,
+                                default_dtype=config.dtype)
+        if config.apply_d3:
+            print("  [→] D3 dispersion correction will be applied to MACE scores.")
+            calc_d3 = TorchDFTD3Calculator(
+                device=config.device, damping="bj",
+                xc=getattr(config, "dispersion_xc", "pbe"),
+                cutoff=getattr(config, "dispersion_cutoff", 40.0))
+            calcs = [SumCalculator([calc_mace, calc_d3])]
+        else:
+            print("  [→] No D3 dispersion correction applied to MACE scores.")
+            calcs = [calc_mace]
+
+    calc = calcs[0]          # used by external-dataset, REICO and relaxation steps below
+    MODEL_PATH = model_paths[0]
     print(f"[→] Provenance: MODEL_PATH set to {MODEL_PATH}")
 
+    score_cache = ScoreCache(Path(CP2K_DIR) / "score_cache.json",
+                            make_cache_tag(model_paths, config))
     selected = select_by_committee(
         all_candidates, calcs, config, _already_computed,
         hash_fn=get_atoms_hash, soap_fn=build_soap_features,
-        phys_check=lambda a, c: is_physically_reasonable(a, c, round_num=config.round))
+        phys_check=lambda a, c: is_physically_reasonable(a, c, round_num=config.round),
+        score_cache=score_cache)
 
     # ---- External datasets (not committee-scored; FPS-sampled by design) ----
     if config.external_datasets:
@@ -2011,8 +2057,11 @@ def run_round(config: ActivePipelineConfig):
         e0_inputs = generate_e0s_input(sorted(elements_needed), config.e0_dir)
 
     # ---- Write CP2K inputs + selected-frames file ----
-    write_all_sp_inputs(selected, CP2K_DIR, config=config,
-                        ignore_names=config.exclude_system_keywords)
+    BATCH = 50
+    for k in range(0, len(selected), BATCH):
+        batch = selected[k:k+BATCH]
+        write_all_sp_inputs(batch, CP2K_DIR, config=config,
+                            ignore_names=config.exclude_system_keywords)
 
     selected_path = f"al_selected_round{config.round}.xyz"
     write(selected_path, selected, format="extxyz")
@@ -2341,7 +2390,8 @@ def parse_all_cp2k_outputs(target_round=None, config = ActivePipelineConfig):
     if not model_index:
         print(f"\n[!] {MODEL_LABEL_INDEX} not found or empty — every .out file will be "
               f"skipped until write_all_sp_inputs registers it. Re-run the selection "
-              f"step first, or check the file wasn't deleted.")
+              f"step first, or check the file wasn't deleted."
+              f"If the file was deleted you can run back_fill.py in the helpers directory.")
 
     # ----------------------------------------------------------------
     # Step 2 — Find all cp2k_sp_round* directories
@@ -2739,6 +2789,9 @@ if __name__ == "__main__":
     # --- CLI overrides, applied explicitly (only if the user actually passed them) ---
     if args.model is not None:
         _FOUNDATION_MODEL = args.model  # see note below on model_path
+    else:
+        print(f"[→] No model defined"
+              f"Using config defined committee mode")
     if args.runs is not None:
         CONFIG.n_select_total = args.runs
     if args.exclude:
