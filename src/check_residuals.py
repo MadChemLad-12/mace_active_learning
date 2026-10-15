@@ -2,7 +2,7 @@ import ase.io
 import ase
 import numpy as np
 from collections import defaultdict
-import hashlib
+import hashlib, inspect
 from sklearn.linear_model import LinearRegression
 from ase.config import cfg
 import os
@@ -16,8 +16,9 @@ import importlib
 ### CONSTANTS
 from configs.constants import E0_JSON, FOUNDATION_MODEL_PATH, MASTER_TRAIN, CLEAN_TRAIN, BAD_TRAIN, EXTERNAL_SYSTEM_TYPES
 from configs.round_configs.schema import ActivePipelineConfig
-from configs.round_configs.round8_check_residual import CheckResidualConfig  
-ROUND = ActivePipelineConfig.round
+# Need to fix this internal checking of round here
+from configs.round_configs.round9_check_residual import CheckResidualConfig  
+ROUND = CheckResidualConfig.round
 
 def load_residual_config(ROUND: int) -> tuple[CheckResidualConfig, callable, callable]:
     
@@ -159,6 +160,14 @@ else:
     mace_path = FOUNDATION_MODEL_PATH
 
 VERIFICATION_MODEL_NAME = Path(mace_path).stem
+def _file_hash(path):
+    return hashlib.md5(Path(path).read_bytes()).hexdigest()[:8]
+
+_cfg_file = inspect.getsourcefile(importlib.import_module(
+    f"configs.round_configs.round{ROUND}_check_residual"))
+CFG_FINGERPRINT = _file_hash(_cfg_file) + "-" + _file_hash(__file__)
+VERIFICATION_KEY = f"{VERIFICATION_MODEL_NAME}|{CFG_FINGERPRINT}"
+print(f"Verification key: {VERIFICATION_KEY}")
 print(f"Using model {mace_path}")
 
 from mace.calculators import MACECalculator
@@ -197,7 +206,8 @@ for index, atoms in enumerate(unique_frames):
     # the MACE-vs-REF comparison (step 4) actually depends on which model is
     # loaded, so a match means: skip everything, reuse the verdict.
     cached_model = atoms.info.get("verification_model")
-    if cached_model == VERIFICATION_MODEL_NAME and "curation_status" in atoms.info:
+    cached_key = atoms.info.get("verification_key")
+    if cached_key == VERIFICATION_KEY and "curation_status" in atoms.info:
         if atoms.info["curation_status"] == "good":
             good.append(atoms)
         else:
@@ -205,6 +215,10 @@ for index, atoms in enumerate(unique_frames):
             bad_info.append(f"[cached] {stype} index={index} model={labeling_model} "
                             f"reason={atoms.info.get('curation_reason', 'unknown')}")
         continue
+
+    pool_changed = True
+    atoms.info["verification_model"] = VERIFICATION_MODEL_NAME   # informational
+    atoms.info["verification_key"] = VERIFICATION_KEY            # cache key
 
     # Model changed (or frame never verified before) — recompute below and
     # overwrite verification_model/curation_status with fresh results.
