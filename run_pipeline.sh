@@ -137,6 +137,10 @@ run_training_round() {
     local "$END_TIME"="$(date +%s)"
     local "$TIMETAKEN"="$(( (END_TIME - START_TIME) / 60))"
     echo "Round $ROUND completed in $TIMETAKEN minutes."
+
+    mv "*.log" "logs/"
+    mv "*.model" "models/"
+    mv "*.pt" "models/"
 }
 
 R=8

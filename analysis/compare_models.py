@@ -7,7 +7,7 @@ on a fixed test set.
 
 USAGE
 -----
-  # First time: carve out a held-out set from your pool (do this ONCE after round 1)
+  # First time: carve out a held-out set from your pool (do this ONCE after you have more data)
   python compare_models.py --make-held-out
 
   # Basic — compare all auto-discovered rounds against held-out set
@@ -85,12 +85,10 @@ COLORS = ["#6c757d", "#2196F3", "#4CAF50", "#FF9800",
           "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
 
 
-def autodiscover_models():
+def autodiscover_models(config: ActivePipelineConfig) -> list:
     """Find foundation model + all round finals in the current directory."""
     models = []
-    for candidate in ["mace-mp-0b3-medium-float32.model",
-                      ]:
-        #Look into https://huggingface.co/mace-foundations/mace-mh-1 
+    for candidate in [config.committee_model1, config.committee_model2, config.committee_model3, config.FOUNDATION_MODEL_PATH]:
         if os.path.exists(candidate):
             models.append(("Foundation", candidate))
             break
@@ -699,7 +697,8 @@ def main():
             args.models
         ))
     else:
-        model_list = autodiscover_models()
+        # Possible error here
+        model_list = autodiscover_models(config=ActivePipelineConfig())
         if not model_list:
             print("[X] No models found. Use --models to specify them.")
             sys.exit(1)

@@ -1,0 +1,108 @@
+"""
+Round 9 config -- src/active_pipeline.py
+Copy this file to round9_active_pipeline.py at the start of the next round
+and `git diff` against this one to see exactly what changed.
+
+Changed from Round 8 to 9.
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from configs.constants import FOUNDATION_MODEL_PATH
+
+@dataclass
+class ActivePipelineConfig:
+    # --- General ---
+    round: int = 9                     # overridden by args.target if provided
+    n_select_total: int = 100          # overridden by args.runs
+    max_atoms: int = 600               # cap to avoid oversized GPU jobs
+    reuse_existing_cp2k: bool = True   # skip inputs for frames w/ valid CP2K output
+    exclude_system_keywords: List[str] = field(default_factory=list) # Example exclude_system_keywords: List[str] = field(default_factory=lambda: ["nafion"])
+    aimd_stride: int = 5                # stride for AIMD trajectories (1 = no thinning, 2 = every other frame, etc.)
+    
+    # --- MACE ---
+    device: str = "cuda"
+    dtype: str = "float64"
+        
+    # --- Pathology geometry triage before CP2K (catches exploded frames early) ---
+    geoopt_trigger: bool = True
+    geoopt_trigger_force: float = 20.0   # eV/Å -- flags "broken", not "uncertain"
+    geoopt_max_steps: int = 30           # cheap cap, not a full anneal
+    geoopt_fmax_target: float = 2.0      # eV/Å -- "no longer exploding" target
+    apply_d3: bool = False                # MACE+D3 vs MACE-only for this round
+
+    # --- External datasets ---
+    external_datasets: bool = False
+    external_sources: Dict[str, dict] = field(default_factory=lambda: {
+        # "mptrj_pt": {
+        #     "path": "training_data/mptrj-gga-ggapu/master_ranked_MPtrj_structures.extxyz",
+        #     "n_samples": 30,   # only 35 frames total -- take most of them
+        # },
+        # "oc25_pt": {
+        #     "path": "hugface_data/train/master_ranked_OC25_structures.extxyz",
+        #     "n_samples": 90,   # 93 frames total -- sample ~30
+        # },
+    })
+
+    # --- REICO (random imaginary-chemical box) sampling ---
+    reico_sampling: bool = True
+    reico_num: int = 10               # random boxes generated per round
+    reico_min_atoms: int = 20
+    reico_max_atoms: int = 60
+    reico_vol_per_atom: float = 7.0   # Å³/atom, condensed-phase packing density
+    reico_min_dist_scale: float = 1.2 # scales (r_cov_a + r_cov_b) per-pair min distance
+
+    # --- Committee_models ---
+    use_committee: bool = True
+    committee_models: List[str] = field(default_factory=list)
+    committee_head: Optional[str] = "Default"  # must exist in every listed model
+    ts_neighbors: int = 1           # Number of neighbors to use for the TS uncertainty metric (default: 1)
+    dev_lo: Optional[float] = None   # absolute eV/A, optional
+    dev_hi: Optional[float] = None   # absolute eV/A, optional
+    dev_lo_pct: float = 50.0         # percentile window used when dev_lo/dev_hi are None
+    dev_hi_pct: float = 98.0
+    fps_pool_factor: int = 3        # Factor to multiply the number of candidates to select from for FPS selection (default: 3)
+    
+    # --- List of models to use for the committee (if committee_on is True) ---
+    committee_model1: str = "/home/h.jack/MACE_train/mace_active_learning/mace_V8_active_learning_stagetwo.model"
+    committee_model2: str = "/home/h.jack/MACE_train/mace_active_learning/mace_V7_active_learning_stagetwo.model"
+    committee_model3: str = "/home/h.jack/MACE_train/mace_active_learning/mace_V5_active_learning_stagetwo.model"
+    # committee_model4: str = , ... etc. Add more models as needed
+    # If not using the committee you can set committee_on to False and use a the first one listed here.  
+    
+    @property
+    def e0_dir(self) -> str:
+        # Depends on `round`, so this is a property rather than a plain field --
+        # guarantees it's always in sync even if round is overridden post-init.
+        return f"cp2k_e0_round{self.round}"
+
+
+CONFIG = ActivePipelineConfig(
+    round=ActivePipelineConfig.round,
+    use_committee=ActivePipelineConfig.use_committee,
+    committee_models=[
+        ActivePipelineConfig.committee_model1,
+        ActivePipelineConfig.committee_model2,
+        ActivePipelineConfig.committee_model3
+        ],
+    committee_head=ActivePipelineConfig.committee_head
+)
+
+def get_coh_bounds(symbols_set: set, pt_count: int) -> tuple:
+    """
+    SCF sanity check bounds on raw CP2K energy.
+    cohesive = (E_total - sum(E0_ref)) / n_atoms, eV/atom
+    """
+    if pt_count > 3:                                          # Pt slab
+        coh_lo, coh_hi = -10.0, 10.0
+    elif pt_count > 0:                                        # dissolved Pt
+        coh_lo, coh_hi = -10.0, 10.0
+    elif "P" in symbols_set or "N" in symbols_set:
+        coh_lo, coh_hi = -10.0, 10.0
+    elif any(s in symbols_set for s in ("F", "S", "C")):       # Nafion-containing
+        coh_lo, coh_hi = -10.0, 10.0
+    elif symbols_set <= {"H", "O"}:                            # bulk water
+        coh_lo, coh_hi = -10.0, 10.0
+    else:                                                       # fallback
+        coh_lo, coh_hi = -10.0, 5.0
+    return coh_lo, coh_hi

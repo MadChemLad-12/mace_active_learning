@@ -37,7 +37,7 @@ IONIC_SPECIES_CHARGE = {
 }
 
 # --- Location of training files ---
-CLEAN_TRAIN  = "training_clean_v2.xyz"
+CLEAN_TRAIN  = "training_clean.xyz"
 BAD_TRAIN    = "training_bad.xyz"
 MASTER_TRAIN = "master_train_pool.xyz"
 HELD_OUT     = "held_out.xyz"
@@ -50,11 +50,6 @@ KIND_PARAMS = {
     "F":  ("DZVP-MOLOPT-SR-GTH-q7",  "GTH-PBE-q7"),
     "S":  ("DZVP-MOLOPT-SR-GTH-q6",  "GTH-PBE-q6"),
     "Pt": ("DZVP-MOLOPT-SR-GTH-q18", "GTH-PBE-q18"),
-    "B":  ("DZVP-MOLOPT-SR-GTH-q3",  "GTH-PBE-q3"),
-    "P":  ("DZVP-MOLOPT-SR-GTH-q5",  "GTH-PBE-q5"),
-    "Li": ("DZVP-MOLOPT-SR-GTH-q3", "GTH-PBE-q3"),
-    "N":  ("DZVP-MOLOPT-SR-GTH-q5", "GTH-PBE-q5"),
-
 }
 
 # --- Default simulation cell (a, b, c) in Angstrom, keyed by substring

@@ -10,6 +10,7 @@ class ActivePipelineConfig:
     reuse_existing_cp2k: bool = True   # skip inputs for frames w/ valid CP2K output
     exclude_system_keywords: List[str] = field(default_factory=list)
     check_slab_z: bool = False         # Whether to check if atoms go below the Z_slab
+    aimd_stride: int = 5               # stride for AIMD trajectories (1 = no thinning, 2 = every other frame, etc.)
     
     # --- MACE ---
     device: str = "cuda"
