@@ -129,6 +129,7 @@ def make_cache_tag(model_paths, config):
 class ScoreCache:
     def __init__(self, path, tag, flush_every=50):
         self.path, self.tag, self.flush_every = Path(path), tag, flush_every
+        self.path.parent.mkdir(parents=True, exist_ok=True)   # <- new
         self.data, self._dirty = {}, 0
         if self.path.exists():
             blob = json.loads(self.path.read_text())
@@ -144,14 +145,19 @@ class ScoreCache:
     def put(self, h, stats):
         self.data[h] = _jsonable(stats)
         self._dirty += 1
-        if self._dirty >= self.flush_every:      # <- the "batches of 50"
+        if self._dirty >= self.flush_every:
             self.flush()
 
     def flush(self):
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"tag": self.tag, "stats": self.data}))
-        os.replace(tmp, self.path)               # atomic, so a crash can't corrupt it
-        self._dirty = 0
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)   # <- new
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"tag": self.tag, "stats": self.data}))
+            os.replace(tmp, self.path)
+        except Exception as e:
+            print(f"  [!] Score cache save failed ({e!r}); continuing without saving")
+        finally:
+            self._dirty = 0     # don't retry on every subsequent put
 
 
 def find_ts_indices(candidates, stat_fn, n_neighbors=1):
@@ -219,10 +225,21 @@ def _select_by_committee(candidates, calcs, config, already_computed,
     
     def stat(i):
         if i not in cache:
-            h = hash_fn(candidates[i])
+            a = candidates[i]
+            h = hash_fn(a)
             s = score_cache.get(h) if score_cache else None
             if s is None:
-                s = committee_stats(candidates[i], calcs)
+                if len(calcs) == 1 and getattr(config, "use_stored_forces", True) \
+                        and a.calc is not None:
+                    try:
+                        f = a.get_forces()
+                        fmax = float(np.max(np.linalg.norm(f, axis=1)))
+                        s = {"f_max": fmax, "dev_max": fmax, "dev_topk": fmax,
+                            "e_std_per_atom": 0.0}
+                    except Exception:
+                        s = None
+                if s is None:
+                    s = committee_stats(a, calcs)
                 if score_cache:
                     score_cache.put(h, s)
             cache[i] = s
