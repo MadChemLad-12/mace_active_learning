@@ -9,20 +9,33 @@ master_train.xyz, using:
      relative to what's already in the master set.
   2) (Optional) Committee disagreement across trained MACE models.
 
+What's new in this version
+--------------------------
+- SOAP is computed in chunks (--chunk-size frames at a time, parallel over
+  --n-jobs). Each finished chunk is saved to a cache dir, so a crash or
+  Ctrl-C loses at most one chunk, and re-running resumes where it stopped.
+- Descriptors of the candidate database are reused across runs (the cache is
+  keyed on file path/size/mtime + SOAP parameters + stride). The master set is
+  cached the same way and simply recomputed when the file changes.
+- FPS no longer allocates a full (N x D) temporary per iteration; it uses a
+  matvec with precomputed squared norms.
+- Output is written progressively in batches of --batch-size frames, in
+  selection order (most valuable first), optionally paced by --batch-interval
+  seconds between batches.
+- --out may be a directory (no .xyz suffix): one xyz per frame + manifest.csv
+  + a combined selected_frames.xyz at the end.
 
 Usage
 -----
 python database_extractor.py --database MB-pol-104607.xyz \
     --master master_train_pool.xyz --n-select 200 --no-committee \
     --out structures/ --stride 5 --n-jobs 16 --batch-size 20
-    
-    Notes
------
-- Descriptors use dscribe's SOAP. Install with: pip install dscribe --break-system-packages
-- Committee models are loaded via mace.calculators.MACECalculator. Adjust
-  MODEL_LOADER below if your checkpoints need different loading logic
-  (e.g. multihead models with a specific head name).
 """
+
+# Keep BLAS/OpenMP single-threaded: parallelism comes from joblib via --n-jobs.
+import os
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
 
 # Keep BLAS/OpenMP single-threaded: parallelism comes from joblib via --n-jobs.
 import os
