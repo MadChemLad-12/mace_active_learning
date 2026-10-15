@@ -98,7 +98,6 @@ def parse_and_filter_shard(
     return filtered_structures
 
 
-# --- MAIN EXECUTION ---
 if __name__ == "__main__":
     for config in DATASET_CONFIGS:
         print(f"\n==========================================")
