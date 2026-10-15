@@ -417,7 +417,7 @@ def extract_valence_electrons(potential_str: str) -> int:
         return int(match.group(1))
     raise ValueError(f"Could not parse valence electrons from potential string: {potential_str}")
 
-
+import warnings
 def _resolve_dft_charge_state(atoms, name):
     """
     Pulls charge/multiplicity from atoms.info (written by the extxyz export step),
@@ -443,10 +443,14 @@ def _resolve_dft_charge_state(atoms, name):
     n_electrons = total_valence - charge
 
     if (multiplicity - 1) % 2 != n_electrons % 2:
-        raise ValueError(
+        original_multiplicity = multiplicity
+        multiplicity = 1 if n_electrons % 2 == 0 else 2
+        warnings.warn(
             f"{name}: inconsistent spin state re-detected at CP2K-write time -- "
             f"charge={charge} gives {n_electrons} electrons, incompatible with "
-            f"multiplicity={multiplicity}. Refusing to write a broken input."
+            f"multiplicity={original_multiplicity}. Automatically resetting multiplicity to {multiplicity}."
+            f"If you believe this is inccorect rewrite this inside the cp2k.inp file",
+            UserWarning
         )
 
     uks = multiplicity != 1
@@ -900,6 +904,7 @@ def _write_submission_script(path, jobs, cp2k_dir, label, n_total, n_skipped, ap
         f"# {n_skipped} of {n_total} frames skipped (completed .out already present)\n"
         if n_skipped else ""
     )
+    
     header = f"""\
 #!/bin/bash
 set -uo pipefail
@@ -909,27 +914,29 @@ set -uo pipefail
 timestamp=$(date +%Y%m%d_%H%M)
 start_time=$(date +%s)
 counter=0
-export OMP_NUM_THREADS=6
+export OMP_NUM_THREADS=32
 export OPENBLAS_NUM_THREADS=1
 total={len(jobs)}
 
-# --- memory guard settings ---
-MEM_LIMIT_KB=$(( 62 * 1024 * 1024 * 85 / 100 ))   # 85% of 62GB, in KB
-MEM_CHECK_INTERVAL=2                               # seconds between checks
+# --- memory guard settings (128 GB RAM) ---
+MEM_LIMIT_KB=$(( 128 * 1024 * 1024 * 85 / 100 ))   # 85% of 128GB (~111.4 GB)
+MEM_CHECK_INTERVAL=2
+
 FAILED_LOG={cp2k_dir}/failed_jobs.txt
 TIMES_LOG={cp2k_dir}/job_times.log
 
-# Hard backstop in case the polling watchdog misses a fast spike.
-# Virtual memory ulimit in KB; set slightly above MEM_LIMIT_KB so the
-# watchdog (softer, faster to react) is normally the one that fires.
+mkdir -p {cp2k_dir}
+touch "$FAILED_LOG" "$TIMES_LOG"
 
 print_eta() {{
-    if (( counter > 0 && elapsed > 0 )); then
-        avg=$(( elapsed / counter ))
+    local current_elapsed=$1
+    if (( counter > 0 && current_elapsed > 0 )); then
+        avg=$(( current_elapsed / counter ))
         eta=$(( avg * (total - counter) ))
         echo "  ETA: ~$(( eta / 60 ))m remaining"
     fi
 }}
+
 mem_watchdog() {{
     local target_pid=$1
     local job_name=$2
@@ -937,7 +944,7 @@ mem_watchdog() {{
         pids="$target_pid $(pgrep -P "$target_pid" 2>/dev/null)"
         rss=$(ps -o rss= -p $pids 2>/dev/null | awk '{{sum+=$1}} END {{print sum+0}}')
         if (( rss > 0 && rss > MEM_LIMIT_KB )); then
-            echo "job killed because of memory: {{$job_name}} (RSS=${{rss}}KB > limit=${{MEM_LIMIT_KB}}KB)"
+            echo "job killed because of memory: ${{job_name}} (RSS=${{rss}}KB > limit=${{MEM_LIMIT_KB}}KB)"
             kill -TERM "$target_pid" 2>/dev/null
             sleep 2
             kill -KILL "$target_pid" 2>/dev/null
@@ -950,54 +957,56 @@ mem_watchdog() {{
 
 cleanup() {{
     echo "Interrupted at job $counter/$total"
-    rm -f *.wfn *.wfn.bak-1
-    rm -f {cp2k_dir}/*.wfn {cp2k_dir}/*.wfn.bak-1
+    rm -f *.wfn *.wfn.bak-1 {cp2k_dir}/*.wfn {cp2k_dir}/*.wfn.bak-1
     exit 1
 }}
 trap cleanup INT TERM
+
 """
-    
+
     job_blocks = []
     for name, inp in jobs:
         block = f"""\
-        counter=$((counter + 1))
-        job_start=$(date +%s)
-        echo "[$counter/$total] {name} — started $(date +%H:%M)"
+counter=$((counter + 1))
+job_start=$(date +%s)
+echo "[$counter/$total] {name} — started $(date +%H:%M)"
 
-        timeout {CP2K_TIMEOUT} cp2k.ssmp -i {inp} -o {cp2k_dir}/{name}.out &
-        cp2k_pid=$!
-        mem_watchdog "$cp2k_pid" "{name}" &
-        watchdog_pid=$!
+timeout {CP2K_TIMEOUT} cp2k.ssmp -i {inp} -o {cp2k_dir}/{name}.out &
+cp2k_pid=$!
+mem_watchdog "$cp2k_pid" "{name}" &
+watchdog_pid=$!
 
-        wait "$cp2k_pid"
-        cp2k_status=$?
-        kill "$watchdog_pid" 2>/dev/null
-        wait "$watchdog_pid" 2>/dev/null
+wait "$cp2k_pid" 2>/dev/null || cp2k_status=$?
+cp2k_status=${{cp2k_status:-0}}
 
-        if grep -q "MEMKILL: {name}" "$FAILED_LOG" 2>/dev/null; then
-            fail_reason="oom"
-        elif (( cp2k_status == 124 )); then
-            fail_reason="timeout"
-            echo "FAILED (timeout): {name}" >> "$FAILED_LOG"
-        elif (( cp2k_status != 0 )); then
-            fail_reason="crash (exit $cp2k_status)"
-            echo "FAILED (crash exit=$cp2k_status): {name}" >> "$FAILED_LOG"
-        else
-            fail_reason="ok"
-        fi
+kill "$watchdog_pid" 2>/dev/null
+wait "$watchdog_pid" 2>/dev/null
 
-        job_elapsed=$(( $(date +%s) - job_start ))
-        echo "{name} ${{job_elapsed}}s status=${{fail_reason}}" >> "$TIMES_LOG"
-        echo "  finished $(date +%H:%M) (${{job_elapsed}}s, ${{fail_reason}})"
+if grep -q "MEMKILL: {name}" "$FAILED_LOG" 2>/dev/null; then
+    fail_reason="oom"
+elif (( cp2k_status == 124 )); then
+    fail_reason="timeout"
+    echo "FAILED (timeout): {name}" >> "$FAILED_LOG"
+elif (( cp2k_status != 0 )); then
+    fail_reason="crash (exit $cp2k_status)"
+    echo "FAILED (crash exit=$cp2k_status): {name}" >> "$FAILED_LOG"
+else
+    fail_reason="ok"
+fi
 
-        elapsed=$(( $(date +%s) - start_time ))
-        print_eta
-        if (( counter % 10 == 0 )); then
-            rm -f *.wfn *.wfn.bak-1
-            rm -f {cp2k_dir}/*.wfn {cp2k_dir}/*.wfn.bak-1
-        fi
-        """
+job_elapsed=$(( $(date +%s) - job_start ))
+echo "{name} ${{job_elapsed}}s status=${{fail_reason}}" >> "$TIMES_LOG"
+echo "  finished $(date +%H:%M) (${{job_elapsed}}s, ${{fail_reason}})"
+
+elapsed=$(( $(date +%s) - start_time ))
+print_eta "$elapsed"
+
+if (( counter % 10 == 0 )); then
+    rm -f *.wfn *.wfn.bak-1 {cp2k_dir}/*.wfn {cp2k_dir}/*.wfn.bak-1
+fi
+"""
         job_blocks.append(block)
+
     with open(path, mode, encoding="utf-8") as f:
         if mode == "w":
             f.write(header)
@@ -1924,8 +1933,36 @@ def run_round(config: ActivePipelineConfig):
 
     # ---- NEB / GeoOpt candidates ----
     all_candidates = load_candidates(AL_INPUT_DIR)
+    n_defaulted = 0
+    
+    # ---- Thin AIMD trajectories to reduce redundancy ----
+    stride = config.aimd_stride
+    if stride > 1:
+        from collections import defaultdict
+        seen_per_system = defaultdict(int)
+        thinned_candidates = []
+        for atoms in all_candidates:
+            if atoms.info.get("source") != "mace_aimd":
+                thinned_candidates.append(atoms)
+                continue
+            key = atoms.info.get("system_type", "?")
+            if seen_per_system[key] % stride == 0:
+                thinned_candidates.append(atoms)
+            seen_per_system[key] += 1
+        print(f"[→] Thinned AIMD candidates by stride {stride}: "
+              f"{len(all_candidates)} → {len(thinned_candidates)}")
+        all_candidates = thinned_candidates
+    
+    
+    for a in all_candidates:
+        if "charge" not in a.info or "multiplicity" not in a.info:
+            a.info["charge"] = 0
+            a.info["multiplicity"] = 1
+            a.info["charge_defaulted"] = True
+            n_defaulted += 1
+    if n_defaulted:
+        print(f"[!] {n_defaulted} candidates had no charge/multiplicity -> assumed charge 0, multiplicity 1")
     geom_index = _load_geometry_index(CP2K_DIR) if config.reuse_existing_cp2k else {}
-
     def _already_computed(atoms):
         entry = geom_index.get(get_atoms_hash(atoms))
         return bool(entry) and _cp2k_output_is_complete(
@@ -1954,14 +1991,79 @@ def run_round(config: ActivePipelineConfig):
     calc = calcs[0]          # used by external-dataset, REICO and relaxation steps below
     MODEL_PATH = model_paths[0]
     print(f"[→] Provenance: MODEL_PATH set to {MODEL_PATH}")
+    
+    ### Need to remove later
+    Debugger = False
+    if Debugger == True:
+        print("[→] Fast approach enabled: only the first model in the committee will be used for scoring.")
+        scored = []
+        n_no_forces = 0
+        for atoms in all_candidates:
+            f, score = None, 0.0
+            if atoms.calc is not None:
+                try:
+                    f = atoms.get_forces()
+                    score = float(np.max(np.linalg.norm(f, axis=1)))
+                except Exception:
+                    score = 0.0
+            else:
+                n_no_forces += 1
+            scored.append((score, atoms, f))
+        print(f"[→] Scored {len(scored)} frames from stored forces "
+              f"({n_no_forces} had no stored forces -> score 0)")
 
-    score_cache = ScoreCache(Path(CP2K_DIR) / "score_cache.json",
-                            make_cache_tag(model_paths, config))
-    selected = select_by_committee(
-        all_candidates, calcs, config, _already_computed,
-        hash_fn=get_atoms_hash, soap_fn=build_soap_features,
-        phys_check=lambda a, c: is_physically_reasonable(a, c, round_num=config.round),
-        score_cache=score_cache)
+        # Sort by descending force magnitude
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        selected = []
+        skipped_computed = 0
+        skipped_unphysical = 0
+        skipped_seen = set()
+
+        print(f"\n[→] Selecting up to {config.n_select_total} frames that need CP2K...")
+        for score, atoms, forces in scored:
+            if len(selected) >= config.n_select_total:
+                break
+            geom_hash = get_atoms_hash(atoms)
+
+            if geom_hash in skipped_seen:
+                continue
+
+            if _already_computed(atoms):
+                skipped_computed += 1
+                continue
+
+            is_ok, reason = is_physically_reasonable(
+                atoms, calc, round_num=config.round, forces=forces)
+            if not is_ok:
+                print(f"  [✗] Skipped (unphysical): "
+                      f"{atoms.info.get('system_type','?')}  — {reason}")
+                skipped_unphysical += 1
+                continue
+
+            skipped_seen.add(geom_hash)
+            selected.append(atoms)
+            print(f"  [+] Selected frame {len(selected):3d}/{config.n_select_total}  "
+                  f"score={score:.3f} eV/Å  "
+                  f"system={atoms.info.get('system_type','?')}")
+
+        print(f"\n  [✓] Selected {len(selected)} frames for CP2K  |  "
+              f"{skipped_computed} already computed  |  "
+              f"{skipped_unphysical} unphysical  |  "
+              f"remaining pool {len(scored) - len(selected) - skipped_computed - skipped_unphysical}")
+        if len(selected) < config.n_select_total:
+            print(f"  [!] Warning: only found {len(selected)} new frames — "
+                  f"candidate pool may be exhausted. Consider running more GeoOpts/NEBs.")
+    
+    else:
+
+        score_cache = ScoreCache(Path(CP2K_DIR) / "score_cache.json",
+                                make_cache_tag(model_paths, config))
+        selected = select_by_committee(
+            all_candidates, calcs, config, _already_computed,
+            hash_fn=get_atoms_hash, soap_fn=build_soap_features,
+            phys_check=lambda a, c: is_physically_reasonable(a, c, round_num=config.round),
+            score_cache=score_cache)
 
     # ---- External datasets (not committee-scored; FPS-sampled by design) ----
     if config.external_datasets:
