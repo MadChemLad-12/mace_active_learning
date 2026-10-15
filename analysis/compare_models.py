@@ -195,7 +195,7 @@ def extract_model_e0s(model_path: str, head_name: str = "Default") -> dict:
 # Evaluation
 # ==============================================================================
 def evaluate_model(model_path, test_frames, device="cuda", dtype="float32",
-                   ref_e0s=None, pred_e0s=None):
+                   ref_e0s=None, pred_e0s=None, add_d3=None, d3_damping="zero"):
     """
     Evaluate model on every frame.
 
@@ -219,11 +219,12 @@ def evaluate_model(model_path, test_frames, device="cuda", dtype="float32",
         default_dtype=dtype,
         head = "Default"
     )
-    if APPLY_D3:
+    use_d3 = APPLY_D3 if add_d3 is None else add_d3
+    if use_d3:
         print(f"[→] Including D3 in calculations (MACE + D3)")
         calc_DFT = TorchDFTD3Calculator(
                     device="cuda",
-                    damping="bj",
+                    damping=d3_damping,
                     xc=cfg.get("dispersion_xc", "pbe"),
                     cutoff=cfg.get("dispersion_cutoff", 40.0),
                 )
@@ -661,6 +662,12 @@ def main():
                         help="Filter to one system_type")
     parser.add_argument("--outdir", default=DEFAULT_OUTPUT)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--finetuned-regex", default=r"^MACE-V\d",
+                        help="Labels matching this regex are your CP2K-trained models: no D3 added, same E0s on both sides")
+    parser.add_argument("--no-d3-baselines", action="store_true",
+                        help="Do NOT add D3 to the foundation-model baselines")
+    parser.add_argument("--d3-damping", default="zero", choices=["zero", "bj"],
+                        help="Must match the reference (CP2K DFTD3 default and VASP IVDW=11 are zero damping)")
     parser.add_argument("--make-held-out", action="store_true",
                         help="Create held_out.xyz from cleaned data then exit")
     parser.add_argument("--cleaned-file", default="cleaned_pool.xyz",
@@ -733,21 +740,27 @@ def main():
         #
         # DFT side always uses CP2K_E0S (your data's reference frame).
         # ---------------------------------------------------------------
-        pred_e0s = extract_model_e0s(model_path)
-        if pred_e0s:
-            print(f"  [E0s] Prediction side — extracted from checkpoint:")
-            for sym, val in sorted(pred_e0s.items()):
-                print(f"        {sym}: {val:.4f} eV")
+        is_ft = re.search(args.finetuned_regex, label) is not None
+        if is_ft:
+            # Trained directly on REF_energy (CP2K scale, D3 already in the labels):
+            # subtract the SAME E0s from both sides so any E0 choice cancels exactly.
+            pred_e0s = CP2K_E0S
+            print(f"  [E0s] {label}: fine-tuned model, using CP2K E0s on both sides; no D3 added")
         else:
-            print(f"  [E0s] WARNING: could not extract E0s from checkpoint.")
-            print(f"        Prediction side will use no shift — energy RMSE")
-            print(f"        may be inflated by a reference-frame offset.")
-            print(f"        Using default E0s")
-            pred_e0s=CP2K_E0S
- 
+            pred_e0s = extract_model_e0s(model_path)
+            if pred_e0s:
+                print(f"  [E0s] Prediction side - extracted from checkpoint:")
+                for sym, val in sorted(pred_e0s.items()):
+                    print(f"        {sym}: {val:.4f} eV")
+            else:
+                print(f"  [E0s] WARNING: could not extract E0s from checkpoint; using CP2K E0s")
+                pred_e0s = CP2K_E0S
+        add_d3 = (not is_ft) and (not args.no_d3_baselines)
+
         results = evaluate_model(
             model_path, test_frames, device=args.device,
             ref_e0s=CP2K_E0S, pred_e0s=pred_e0s,
+            add_d3=add_d3, d3_damping=args.d3_damping,
         )
         metrics = compute_metrics(results)
         per_system = evaluate_per_system(results)
