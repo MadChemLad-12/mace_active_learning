@@ -29,11 +29,11 @@ MODELS = {
 @dataclass
 class NebModelCompareConfig:
     device: str = "cuda"
-    dtype: str = "float32"
+    dtype: str = "float64"
 
     # --- Endpoint pre-relaxation ---
     relax_endpoints: bool = True
-    endpoint_fmax: float = 0.05   # eV/Å
+    endpoint_fmax: float = 0.10   # eV/Å
 
     # --- Structure validation (dissolution mover detection) ---
     dissolving_threshold: float = 2.0    # Å -- beyond this, atom is a "mover"
@@ -43,7 +43,7 @@ class NebModelCompareConfig:
 
     # --- NEB ---
     n_images: int = 10
-    neb_fmax: float = 0.05
+    neb_fmax: float = 0.10
     neb_optimizer: str = "FIRE"
     neb_max_steps: int = 500
     climb: bool = False

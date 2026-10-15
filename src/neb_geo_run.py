@@ -567,7 +567,7 @@ def get_energy_barrier(images, name):
         "reaction_energy":  E_reaction,
     }
 
-def neb_workflow(init_atoms, final_atoms, calc, config: NebGeoRunConfig, name, use_proximity_mapping=False):
+def neb_workflow(init_atoms, final_atoms, calc, config: NebGeoRunConfig, name, use_proximity_mapping=False, charge=0, multiplicity=1):
     """
     Run CI-NEB between init_atoms and final_atoms using MACE.
 
@@ -686,6 +686,8 @@ def neb_workflow(init_atoms, final_atoms, calc, config: NebGeoRunConfig, name, u
         img.info["neb_image"]   = idx
         img.info["source"]      = "mace_neb"
         img.info["n_images"]    = len(images)
+        img.info["charge"] = charge
+        img.info["multiplicity"] = multiplicity
 
     # Standard visualisation output
     write(os.path.join(OUTPUT_DIR, f"{name}_neb.extxyz"), images, format="extxyz")
@@ -936,7 +938,7 @@ def plumed_sampling(atoms, calc, name,
 # AIMD WORKFLOW  (unbiased NVT thermal sampling with MACE)
 # ==============================================================================
 
-def aimd_sampling(atoms, calc, name, config: NebGeoRunConfig, n_steps=None, timestep=None):
+def aimd_sampling(atoms, calc, name, config: NebGeoRunConfig, n_steps=None, timestep=None, charge=0, multiplicity=1):
     """
     Run unbiased NVT Langevin MD with MACE to thermally sample the local
     energy surface around a given structure.
@@ -1021,6 +1023,8 @@ def aimd_sampling(atoms, calc, name, config: NebGeoRunConfig, n_steps=None, time
         at.info["aimd_step"]     = prod_dyn.get_number_of_steps()
         at.info["aimd_temp_K"]   = config.aimd_temp
         at.info["aimd_dt_fs"]    = timestep
+        at.info["charge"] = charge
+        at.info["multiplicity"] = multiplicity
         sampled_frames.append(at)
 
     prod_dyn.attach(_save_frame, interval=config.aimd_stride)
@@ -1045,6 +1049,7 @@ def aimd_sampling(atoms, calc, name, config: NebGeoRunConfig, n_steps=None, time
     traj_out = os.path.join(OUTPUT_DIR, f"{name}_aimd.extxyz")
     write(traj_out, sampled_frames, format="extxyz")
 
+    
     al_path = os.path.join(AL_EXPORT_DIR, f"mace_aimd_{name}.extxyz")
     write(al_path, sampled_frames, format="extxyz")
     print(f"  [✓] AIMD frames exported for AL: {al_path}")
@@ -1284,7 +1289,7 @@ def main():
             
         if not CONFIG.skip_neb:
             if init_for_neb is not None and final_for_neb is not None and init_ok and final_ok:
-                neb_workflow(init_for_neb, final_for_neb, calc, CONFIG, name)
+                neb_workflow(init_for_neb, final_for_neb, calc, CONFIG, name, charge=charge, multiplicity=multiplicity)
                 config_result["neb_run"] = True
             else:
                 print(f"  [!] Skipping NEB for {name}: endpoints not ready/stable.")
@@ -1325,7 +1330,7 @@ def main():
                 for endpoint_label, endpoint_atoms in aimd_targets:
                     aimd_name = f"{name}_{endpoint_label}"
                     print(f"  [→] Running AIMD on {endpoint_label} structure of {name}...")
-                    aimd_frames = aimd_sampling(endpoint_atoms, calc, aimd_name, CONFIG)
+                    aimd_frames = aimd_sampling(endpoint_atoms, calc, aimd_name, CONFIG, charge, multiplicity)
                     total_aimd_frames += len(aimd_frames)
                 config_result["aimd_run"]    = total_aimd_frames > 0
                 config_result["aimd_frames"] = total_aimd_frames

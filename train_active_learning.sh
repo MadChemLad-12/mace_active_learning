@@ -287,10 +287,10 @@ mace_run_train \
     --multiheads_finetuning=True \
     --pt_train_file="mp" \
     --num_samples_pt="$NUM_SAMPLES_PT" \
-    --num_workers=4 \
     --pin_memory=True \
     --device=cuda \
-    $RESTART_FLAG 2>&1 | tee -a "$TRAIN_LOG"
+    --seed 421 \
+    $RESTART_FLAG 2>&1 | tee -a "$TRAIN_LOG" 
 
 train_exit=${PIPESTATUS[0]}
 

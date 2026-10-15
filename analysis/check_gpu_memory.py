@@ -4,8 +4,9 @@ from ase.io import read
 import numpy as np
 import os
 from configs.constants import CLEAN_TRAIN
+from configs.round_configs.schema import ActivePipelineConfig
 
-MODEL_PATH = os.environ.get("MACE_FOUNDATION_MODEL", "mace-mp-0b3-medium-float32.model")
+MODEL_PATH = os.environ.get("MACE_FOUNDATION_MODEL") or os.environ.get("MACE_FINETUNED_MODEL")
 POOL_FILE  = CLEAN_TRAIN
 
 # Load pool and sort by volume largest first
@@ -15,7 +16,8 @@ pool_sorted = sorted(
     key=len, 
     reverse=True
 )
-calc = MACECalculator(model_paths=MODEL_PATH, device="cuda", default_dtype="float32")
+config = ActivePipelineConfig()
+calc = MACECalculator(model_paths=MODEL_PATH, device=config.device, default_dtype=config.dtype)
 
 print(f"{'Volume (Å³)':<15} {'N atoms':<10} {'Index' :<10} {'Status':<10} ")
 print("-" * 40)

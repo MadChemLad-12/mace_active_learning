@@ -72,11 +72,11 @@ launch.json
 dump_env.sh
 fps_validate_frames_corrected.xyz
 model_label_index.json
-structuresV9/
-.soap_cache/
-.vscode/
-structuresV9/
 data/
+mace_*_active_learning_valid_*.txt
+results/mace_*_active_learning_run-*.txt
+.soap_cache/
+/home/h.jack/MACE_train/mace_active_learning/MB-pol-104607.xyz
+structuresV9/
+src/active_pipeline_old.py
 MB-pol-104607.xyz
-active_pipeline_old.py
-

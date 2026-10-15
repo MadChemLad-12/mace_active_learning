@@ -8,11 +8,11 @@ from dataclasses import dataclass
 
 @dataclass
 class NebGeoRunConfig:
-    round: int = 1
+    round: int = 9
     # --- Device / precision ---
     device: str = "cuda"        # "cuda" or "cpu"
     dtype: str = "float32"      # must match your model's dtype
-    nodes: int = 6              # see note on Singularity + multi-node below
+    nodes: int = 16              # see note on Singularity + multi-node below
 
     # --- Geometry optimisation ---
     fmax: float = 0.05                # eV/Å, force convergence threshold

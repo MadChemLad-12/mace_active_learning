@@ -32,9 +32,9 @@ leave them out to use the defaults):
 D3 note: the committee models were trained on CP2K PBE-D3 labels, so D3 is
 already inside them. D3 is NOT added here.
 """
-import hashlib
+import json, os, hashlib
 from collections import defaultdict
-
+from pathlib import Path
 import numpy as np
 from ase.neighborlist import neighbor_list
 
@@ -47,6 +47,7 @@ def load_committee(config):
     from mace.calculators import MACECalculator
 
     from pathlib import Path
+    print(f"[→] Loading committee models from {len(config.committee_models)} paths...")
     paths = list(getattr(config, "committee_models", None) or [])
     if not paths:
         raise ValueError("Set config.committee_models to the model path(s) to use.")
@@ -112,6 +113,52 @@ def fps_indices(features, n):
         mind = np.minimum(mind, np.linalg.norm(features - features[nxt], axis=1))
     return chosen
 
+def _jsonable(o):
+    if isinstance(o, dict):  return {k: _jsonable(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)): return [_jsonable(v) for v in o]
+    if isinstance(o, np.ndarray):    return o.tolist()
+    if isinstance(o, np.generic):    return o.item()
+    return o
+
+def make_cache_tag(model_paths, config):
+    """Changes whenever the models, dtype or D3 setting change -> stale scores never reused."""
+    parts = [f"{p}:{os.path.getmtime(p)}" for p in model_paths]
+    parts += [str(config.dtype), str(config.apply_d3)]
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:12]
+
+class ScoreCache:
+    def __init__(self, path, tag, flush_every=50):
+        self.path, self.tag, self.flush_every = Path(path), tag, flush_every
+        self.path.parent.mkdir(parents=True, exist_ok=True)   # <- new
+        self.data, self._dirty = {}, 0
+        if self.path.exists():
+            blob = json.loads(self.path.read_text())
+            if blob.get("tag") == tag:
+                self.data = blob["stats"]
+                print(f"[→] Score cache: {len(self.data)} frames loaded")
+            else:
+                print("[!] Score cache is from different models/settings, starting fresh")
+
+    def get(self, h):
+        return self.data.get(h)
+
+    def put(self, h, stats):
+        self.data[h] = _jsonable(stats)
+        self._dirty += 1
+        if self._dirty >= self.flush_every:
+            self.flush()
+
+    def flush(self):
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)   # <- new
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"tag": self.tag, "stats": self.data}))
+            os.replace(tmp, self.path)
+        except Exception as e:
+            print(f"  [!] Score cache save failed ({e!r}); continuing without saving")
+        finally:
+            self._dirty = 0     # don't retry on every subsequent put
+
 
 def find_ts_indices(candidates, stat_fn, n_neighbors=1):
     """
@@ -143,8 +190,18 @@ def find_ts_indices(candidates, stat_fn, n_neighbors=1):
 # ------------------------------------------------------------------
 # Main selection
 # ------------------------------------------------------------------
+#Wrapper to ensure score_cache is flushed even if an exception occurs
 def select_by_committee(candidates, calcs, config, already_computed,
-                        hash_fn, soap_fn, phys_check):
+                        hash_fn, soap_fn, phys_check, score_cache=None):
+    try:
+        return _select_by_committee(candidates, calcs, config, already_computed,
+                                    hash_fn, soap_fn, phys_check, score_cache)
+    finally:
+        if score_cache:
+            score_cache.flush()
+            
+def _select_by_committee(candidates, calcs, config, already_computed,
+                        hash_fn, soap_fn, phys_check, score_cache=None):
     """
     candidates       list[Atoms] from load_candidates (with info['_src'])
     calcs            from load_committee
@@ -165,9 +222,27 @@ def select_by_committee(candidates, calcs, config, already_computed,
     cache = {}
     score_key = "dev_max" if len(calcs) > 1 else "f_max"
     print(f"[→] Scoring mode: {'committee disagreement' if score_key == 'dev_max' else 'single-model max force'}")
+    
     def stat(i):
         if i not in cache:
-            cache[i] = committee_stats(candidates[i], calcs)
+            a = candidates[i]
+            h = hash_fn(a)
+            s = score_cache.get(h) if score_cache else None
+            if s is None:
+                if len(calcs) == 1 and getattr(config, "use_stored_forces", True) \
+                        and a.calc is not None:
+                    try:
+                        f = a.get_forces()
+                        fmax = float(np.max(np.linalg.norm(f, axis=1)))
+                        s = {"f_max": fmax, "dev_max": fmax, "dev_topk": fmax,
+                            "e_std_per_atom": 0.0}
+                    except Exception:
+                        s = None
+                if s is None:
+                    s = committee_stats(a, calcs)
+                if score_cache:
+                    score_cache.put(h, s)
+            cache[i] = s
         return cache[i]
 
     def eligible(i, seen):
@@ -203,16 +278,16 @@ def select_by_committee(candidates, calcs, config, already_computed,
     if not rest:
         print("  [!] no candidates left to score")
 
-    dev = np.array([cache[i]["dev_max"] for i in rest]) if rest else np.array([0.0])
+    dev = np.array([cache[i][score_key] for i in rest]) if rest else np.array([0.0])
     pct = np.percentile(dev, [10, 50, 90, 98, 100])
-    print(f"  dev_max percentiles (10/50/90/98/100): "
+    print(f"  {score_key} percentiles (10/50/90/98/100): "
           + "  ".join(f"{p:.3f}" for p in pct) + " eV/A")
     lo = dev_lo if dev_lo is not None else float(np.percentile(dev, lo_pct))
     hi = dev_hi if dev_hi is not None else float(np.percentile(dev, hi_pct))
-    print(f"  trust window: {lo:.3f} <= dev_max <= {hi:.3f} eV/A")
+    print(f"  trust window: {lo:.3f} <= {score_key} <= {hi:.3f} eV/A")
 
-    in_window = sorted((i for i in rest if lo <= cache[i]["dev_max"] <= hi),
-                       key=lambda i: -cache[i]["dev_max"])
+    in_window = sorted((i for i in rest if lo <= cache[i][score_key] <= hi),
+                   key=lambda i: -cache[i][score_key])
     n_rest = max(0, n_select - len(ts_idx))
     pool = in_window[: pool_factor * n_rest]
 
@@ -237,7 +312,7 @@ def select_by_committee(candidates, calcs, config, already_computed,
         a = candidates[i].copy()
         a.calc = None
         s = cache[i]
-        a.info["committee_dev"] = s["dev_max"]
+        a.info["committee_dev"] = s[score_key]
         a.info["committee_dev_topk"] = s["dev_topk"]
         a.info["committee_e_std"] = s["e_std_per_atom"]
         a.info["committee_fmax"] = s["f_max"]
