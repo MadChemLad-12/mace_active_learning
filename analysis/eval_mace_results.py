@@ -18,12 +18,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 from ase.io import read
 
+import json
+import torch
+from ase.data import chemical_symbols
+from configs.constants import E0_JSON
+    
 # ---- Key Configuration (Adjust to match your extxyz attributes) ----
 ENERGY_REF_KEY = "REF_energy"
 ENERGY_PRED_KEY = "MACE_energy"
 FORCES_REF_KEY = "REF_forces"
 FORCES_PRED_KEY = "MACE_forces"
 CONFIG_TYPE_KEY = "system_type"  # Change to "system_type" if needed
+#EXCLUDE = ("mptrj", "pt3o4", "DB02", "particle", "reico", "oc25") # Structures to exclude 
 # ----------------------------------------------------------------------
 
 
@@ -62,6 +68,7 @@ def load_all_data(xyz_path):
             data[ctype]["e_ref"].append(atoms.info[ENERGY_REF_KEY])
             data[ctype]["e_pred"].append(atoms.info[ENERGY_PRED_KEY])
             data[ctype]["n_atoms"].append(len(atoms))
+            data[ctype].setdefault("symbols", []).append(atoms.get_chemical_symbols())
         else:
             missing_energy += 1
 
@@ -98,6 +105,30 @@ def load_all_data(xyz_path):
 
     return data
 
+def remove_energy_offset(data):
+    """Fit per-element E0 shift so E_ref - E_pred = sum_i n_i * dE0_i + residual."""
+    elems = sorted({s for d in data.values() for syms in d.get("symbols", []) for s in syms})
+    idx = {e: i for i, e in enumerate(elems)}
+    X, y, owners = [], [], []
+    for ctype, d in data.items():
+        for k, syms in enumerate(d.get("symbols", [])):
+            row = np.zeros(len(elems))
+            for s in syms:
+                row[idx[s]] += 1
+            X.append(row)
+            y.append(d["e_ref"][k] - d["e_pred"][k])
+            owners.append((ctype, k))
+    X, y = np.array(X), np.array(y)
+    try:
+        mask = np.array([not any(p in c for p in EXCLUDE) for c, _ in owners])
+        dE0, *_ = np.linalg.lstsq(X[mask], y[mask], rcond=None)
+    except:
+        dE0, *_ = np.linalg.lstsq(X, y, rcond=None)
+    print("Fitted per-element offsets (eV):", dict(zip(elems, dE0.round(3))))
+    # shift reference energies onto MACE's scale
+    for (ctype, k), shift in zip(owners, X @ dE0):
+        data[ctype]["e_ref"][k] -= shift
+    return dict(zip(elems, dE0))
 
 def build_and_write_summary_tables(data, out_dir):
     """Print and write aggregate error metrics and distribution shape summaries."""
@@ -223,6 +254,17 @@ def plot_parity(data, out_dir):
         fig.tight_layout()
         fig.savefig(out_dir / "energy_parity.png", dpi=200)
     plt.close(fig)
+    from sklearn.metrics import mean_squared_error, r2_score
+    mse = mean_squared_error(all_e_ref, all_e_pred)
+    rmse_val = np.sqrt(mse)
+    
+    # 3. Calculate R2 score
+    r2 = r2_score(all_e_ref, all_e_pred)
+    
+    # Print results
+    print(f"Energy RMSE: {rmse_val:.4f} meV/atom")
+    print(f"Energy R² Score: {r2:.4f}")
+
 
     # 2. Combined Force Parity
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -253,6 +295,16 @@ def plot_parity(data, out_dir):
         fig.tight_layout()
         fig.savefig(out_dir / "force_parity.png", dpi=200)
     plt.close(fig)
+    from sklearn.metrics import mean_squared_error, r2_score
+    mse = mean_squared_error(all_f_ref, all_f_pred)
+    rmse_val = np.sqrt(mse)
+
+    # 3. Calculate R2 score
+    r2 = r2_score(all_f_ref, all_f_pred)
+
+    # Print results
+    print(f"Force RMSE: {rmse_val:.4f} eV/A")
+    print(f"Force R² Score: {r2:.4f}")
 
     # 3. Small Multiples Energy Parity
     ctypes = [c for c, d in data.items() if d["e_ref"]]
@@ -375,21 +427,42 @@ def main():
         default=None,
         help="Optional: restrict distribution plots to specific config_type labels",
     )
+    ap.add_argument(
+        "--model",
+        default="mace-mpa-0-medium.model",
+        help="Used to compare the E0s of the models",
+    )
     args = ap.parse_args()
-
+    
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     data = load_all_data(args.xyz)
+    e0_shifts = remove_energy_offset(data)          # modifies data in place
     build_and_write_summary_tables(data, out_dir)
-
+    
     print("\nGenerating plots...")
     plot_parity(data, out_dir)
     plot_distributions(
         data, out_dir, types_filter=set(args.types) if args.types else None
     )
     print(f"All plots and tables successfully generated in {out_dir}/")
+    model = torch.load(args.model, map_location="cpu", weights_only=False)
+    zs = model.atomic_numbers.tolist()
+    e0s = model.atomic_energies_fn.atomic_energies.detach().cpu().squeeze().tolist()
+    mace_e0 = {chemical_symbols[z]: e for z, e in zip(zs, e0s)}
 
+    # E0_JSON may be a dict or a path to a json file; handle both
+    cp2k_e0 = json.load(open(E0_JSON)) if isinstance(E0_JSON, (str, Path)) else E0_JSON
+    # keys may be atomic numbers rather than symbols
+    cp2k_e0 = {(chemical_symbols[int(k)] if str(k).isdigit() else k): v
+            for k, v in cp2k_e0.items()}
+
+    print(f"\n{'el':<4}{'fitted shift':>14}{'CP2K E0':>14}{'model E0':>12}{'CP2K - model':>14}")
+    for el, shift in e0_shifts.items():
+        if el in mace_e0 and el in cp2k_e0:
+            print(f"{el:<4}{shift:>14.3f}{cp2k_e0[el]:>14.3f}{mace_e0[el]:>12.3f}"
+                f"{cp2k_e0[el] - mace_e0[el]:>14.3f}")
 
 if __name__ == "__main__":
     main()
