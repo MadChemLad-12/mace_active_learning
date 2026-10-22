@@ -170,6 +170,11 @@ STRESS_SWA="${STRESS_SWA:-10}"
 # Load JSON E0 values
 # JSON_FILE="E0_values.json"
 JSON_FILE=$(python3 -c "from configs.constants import E0_JSON; print(E0_JSON)")
+CONFIG_TYPE_WEIGHTS=$(python3 -c "
+import json
+from configs.constants import CONFIG_TYPE_WEIGHTS_JSON
+print(json.dumps(json.load(open(CONFIG_TYPE_WEIGHTS_JSON))))
+")
 
 # Extract ATOMIC_NUMBERS using inline Python
 ATOMIC_NUMBERS=$(python3 -c "
@@ -263,6 +268,7 @@ mace_run_train \
     --valid_fraction="$VALIDATION_FRACTION" \
     --test_file="$EVAL_CONFIGS" \
     --default_dtype="$FLOAT_TYPE" \
+    --config_type_weights "$CONFIG_TYPE_WEIGHTS" \
     --energy_key="REF_energy" \
     --forces_key="REF_forces" \
     --stress_key="REF_stress" \
@@ -287,6 +293,8 @@ mace_run_train \
     --multiheads_finetuning=True \
     --pt_train_file="mp" \
     --num_samples_pt="$NUM_SAMPLES_PT" \
+    --ema \
+    --ema_decay=0.99 \
     --pin_memory=True \
     --device=cuda \
     --seed 421 \

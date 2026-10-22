@@ -1,0 +1,1682 @@
+{
+  "2pttop": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "2pttopoh": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "5PtGraph_sol_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": 1.0
+  },
+  "6PthemGraph_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 1.0
+  },
+  "6PthemGraph_sol_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "7PtGraph_sol_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "A5_CSIRO_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "A8_CSIRO_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "Chair4x4sat_sol_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.0Pt": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.25Pt": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.25PtO": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.25PtOH": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.25PtOH2": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.375Pt": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.375PtO": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.375PtO2": {
+    "count": 9,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.375PtOH": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.375PtOH2": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.75Pt": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.75PtO": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.75PtO2": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.75PtOH": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Close0.75PtOH2": {
+    "count": 9,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "DB02_150Master_126.xyz_initial_opt_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "DB02_150Master_132.xyz_initial_opt_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "DB02_150Master_144.xyz_initial_opt_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": 0.4
+  },
+  "DB02_150Master_55.xyz_initial_opt_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "DissolvedO2_Nafion": {
+    "count": 9,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "DissolvedOH_Nafion": {
+    "count": 19,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.0Pt": {
+    "count": 15,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.25Pt": {
+    "count": 17,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.25PtO": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.25PtO2": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.25PtOH": {
+    "count": 9,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.25PtOH2": {
+    "count": 8,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.375Pt": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.375PtO": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.375PtO2": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.375PtOH": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.375PtOH2": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.75Pt": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.75PtO": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.75PtO2": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.75PtOH": {
+    "count": 8,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry0.75PtOH2": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry1.0Pt": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry1.0PtO": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry1.0PtO2": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry1.0PtOH": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Dry1.0PtOH2": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_5PtGraph_sol": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_6PthemGraph_sol": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_7PtGraph_sol": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Chair4x4": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Chair4x4_sol": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Chair4x4sat": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Chair4x4sat_sol": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Clo0.375Neb7": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Clo0.375neb5": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Clo0.75Neb9": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Clo0.75neb9": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.0Pt_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.0Pt_neb_img05": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.0Pt_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25PtOH2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25PtOH_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25PtOH_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25PtOH_neb_img10": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25PtO_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25PtO_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25PtO_neb_img09": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25Pt_neb_img09": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.25Pt_neb_img10": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtO2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtO2_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtO2_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtOH2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtOH2_neb_img05": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtOH2_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtOH_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtOH_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtOH_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtO_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375PtO_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.375Pt_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtO2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtO2_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtO2_neb_img11": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtOH2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtOH2_neb_img04": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtOH2_neb_img05": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtOH_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtOH_neb_img11": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtO_neb_img04": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75PtO_neb_img05": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75Pt_neb_img05": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Close0.75Pt_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Dry0.0Pt_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Dry0.0Pt_neb_img05": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Dry0.25Pt_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Dry0.25Pt_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Dry0.25Pt_neb_img11": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Graphmono4x4x2": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "FORCED_Graphmono4x4x2_sol": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.25PtO2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.25PtO2_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.25PtO2_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.25PtOH2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.25PtOH2_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.25PtOH_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.25PtOH_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375Neb4": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375PtO2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375PtO2_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375PtOH2_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375PtOH2_neb_img09": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375PtOH_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375PtOH_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375PtOH_neb_img10": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.375Pt_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75O2neb10": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtO2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtO2_neb_img04": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtO2_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtOH2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtOH2_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtOH2_neb_img09": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtOH_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtOH_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75PtOH_neb_img09": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75Pt_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75Pt_neb_img10": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75neb4": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf0.75neb6": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf1.0PtO2_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf1.0PtOH2": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Naf1.0PtO_neb_img03": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Nafion_four_dry": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Nafion_four_dry_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Nafion_four_dry_neb_img11": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Nafion_single_dry": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Nafion_single_dry_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Nafion_single_dry_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Nafion_single_dry_neb_img11": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Nafion_single_wet": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Pt_particle_2_0": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "FORCED_Pt_particle_3_0": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.4
+  },
+  "FORCED_Pt_particle_4_1": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "FORCED_Pt_particle_6_2": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "FORCED_Wet0.375PtO2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtO2_neb_img05": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtO2_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtOH2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtOH2_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtOH2_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtOH_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtOH_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtOH_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375PtO_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375Pt_neb_img08": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.375Pt_neb_img10": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.75PtO2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.75PtOH2_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.75PtOH2_neb_img04": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.75PtOH_neb_img00": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Wet0.75PtOH_neb_img07": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Zig4x4": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.4
+  },
+  "FORCED_Zig4x4_sol": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.4
+  },
+  "FORCED_Zig4x4sat": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "FORCED_Zig4x4sat_sol": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Graph0.375Vac_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Graph3V_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Graph4x4_initial": {
+    "count": 11,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Graph_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Graphmono4x4x2_initial": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "Graphmono4x4x2_sol_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.0Pt": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.25Pt": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.25PtO": {
+    "count": 8,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.25PtO2": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.25PtOH": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.25PtOH2": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.375Pt": {
+    "count": 8,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.375PtO": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.375PtO2": {
+    "count": 11,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.375PtOH": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.375PtOH2": {
+    "count": 9,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.75Pt": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.75PtO": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.75PtO2": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.75PtOH": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf0.75PtOH2": {
+    "count": 8,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf1.0Pt": {
+    "count": 12,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf1.0PtO": {
+    "count": 11,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf1.0PtO2": {
+    "count": 12,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf1.0PtOH": {
+    "count": 13,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Naf1.0PtOH2": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Nafion_four_dry_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Nafion_single_wet_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt100Naf_initial": {
+    "count": 13,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt100Naf_vac": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt100Naf_vac_initial": {
+    "count": 15,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt100close": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt100close_initial": {
+    "count": 13,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt100close_vac": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt100close_vac_initial": {
+    "count": 16,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt110close_initial": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt110close_oxo_initial": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt110close_vac_oxo_initial": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt110naf_vac_oxo_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt211close": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt211close_initial": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt211close_oxo_initial": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt211close_oxo_vac": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt211close_oxo_vac_initial": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt4_Chair4x4_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Pt4_SW_CO2Chair4x4_initial": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "PtGraph10*7_initial": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "PtHemGraph20*10_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "PtNafSO3product_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "PtNaf_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "PtOso3_chair_initial": {
+    "count": 16,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "PtOso3sol_chair_initial": {
+    "count": 19,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "PtSWoxo_initial": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "Pt_exp_Chair_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.7
+  },
+  "Pt_oxi_Chair_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": 0.7
+  },
+  "Pt_vac_Chair_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": 0.7
+  },
+  "Ptcluster_Chair_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": 1.0
+  },
+  "Ptparticle_oxi_so3_chari_initial": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.0Pt": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.25Pt": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.25PtO": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.25PtOH": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.25PtOH2": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.375Pt": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.375PtO": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.375PtO2": {
+    "count": 8,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.375PtOH": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.375PtOH2": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.75PtO": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.75PtO2": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.75PtOH": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet0.75PtOH2": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet1.0Pt": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet1.0PtO": {
+    "count": 6,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet1.0PtO2": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet1.0PtOH": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Wet1.0PtOH2": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "Zig4x4sat_sol_initial": {
+    "count": 9,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "bot_dryo.375_pos_1": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "bulk_water_Pt": {
+    "count": 20,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "finalo2v_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "finalv_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "finoh0.75_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "finoh20.75_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "finoh2v_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "finohv_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "finov_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "finv0.75_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "fps_bulk_wet_pt_dissolved_wet_framesv1": {
+    "count": 8,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "fps_naf_naf_contaminants": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "fps_naf_naf_framesv1_recalibrated": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "fps_naf_naf_pt_framesv1_recalibrated": {
+    "count": 9,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "fps_pt_diss_naf_framesv1_recalibrated": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "fps_pt_diss_wet_framesv1_recalibrated": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "full_anti_12_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "full_anti_15_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "full_anti_9_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "full_cross_12_initial": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "full_cross_15_initial": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "full_cross_9_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "full_para_0_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "full_para_12_initial": {
+    "count": 7,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "inoh0.75_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "inoh20.75_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "inputoh2_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "inputptn0.375_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "inputvoh_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "mptrj_pt": {
+    "count": 17,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "nafbulkdismd_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "nafion_single_unit": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "nafion_single_unit_solvated": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "nafptparticle": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "nafptparticle_solvated": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "oc25_pt": {
+    "count": 82,
+    "current_weight": null,
+    "MACE_weight": 0.7
+  },
+  "polymer_nafion_four_dry": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "polymer_nafion_single_dry_f_solvated": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "pt100_monolayer_initial": {
+    "count": 16,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "pt110_monolayer_initial": {
+    "count": 5,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "pt3o4": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.4
+  },
+  "pt3o4cell_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.4
+  },
+  "pt_particle_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.3
+  },
+  "ptbot_pristine_o_cov0.25_nafion": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptbot_pristine_o_cov0.375_nafion": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptbot_pristine_o_cov0.75_nafion": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptbot_pristine_o_cov1.0_nafion": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptclosen0.0_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptclosen0.25_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptclosen0.75_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptclosenaf0.25_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptclosenaf0.375_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptclosenaf1.0_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptdisnaf_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptdissolved": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptn0.25_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptn0.75_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptn1.0_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptnafbulkdismd_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptnoh_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptnohv_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptnv_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "pto2disnaf_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "pto2diss_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptodisnaf_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptodiss_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptohdisnaf_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptohdiss_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "ptparticlenafclose": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.5
+  },
+  "ptvn0.375_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "reico_random": {
+    "count": 293,
+    "current_weight": null,
+    "MACE_weight": 0.2
+  },
+  "simple_anti_0_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_anti_12_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_anti_15_initial": {
+    "count": 10,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_anti_9_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_cross_12_initial": {
+    "count": 3,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_cross_15_initial": {
+    "count": 14,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_cross_9_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_naf_optimised_structure": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_para_0_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_para_12_initial": {
+    "count": 22,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_para_15_initial": {
+    "count": 2,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "simple_para_9_initial": {
+    "count": 4,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "so3pt111": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "so3pt111_solvated": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  },
+  "solventbulk": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": null
+  }
+}
