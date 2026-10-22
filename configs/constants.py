@@ -73,3 +73,4 @@ E0_CELL_SIZE = 20.0  # Angstrom, cubic box for isolated-atom E0 calculations
 # --- External training-set filename tags that should never be pruned
 # from the training set during cleaning, regardless of other rules ---
 EXTERNAL_SYSTEM_TYPES = ("mptrj", "oc25", "reico")
+CONFIG_TYPE_WEIGHTS_JSON = "configs/weights_mace_config_type_weights.json"
