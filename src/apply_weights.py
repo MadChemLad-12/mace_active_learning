@@ -101,19 +101,24 @@ def apply_weights(xyz_path, json_path, out_xyz, key, fallback_key,
     unknown = sorted(names - set(table))
     if unknown:
         sys.exit(f"[error] groups in xyz but not in JSON (re-run init): {unknown}")
-    null = sorted(n for n in names if table[n].get("MACE_weight") is None)
-    if null and default_weight is None:
-        sys.exit(f"[error] null MACE_weight for {null}. Fill them in or pass --default-weight")
 
-    weights_out = {}
+    # resolve one weight per group, once (null -> default_weight)
+    resolved = {}
+    for n in sorted(names):
+        w = table[n].get("MACE_weight")
+        if w is None:
+            w = default_weight
+            print(f"[apply] {n}: MACE_weight is null, using default {w}")
+        w = float(w)
+        if w < 0:
+            sys.exit(f"[error] negative weight for {n}")
+        resolved[n] = w
+
+    # label every frame
     stripped = 0
     for atoms in frames:
         name = group_name(atoms, key, fallback_key)
-        w = table[name].get("MACE_weight")
-        w = float(default_weight if w is None else w)
-        if w < 0:
-            sys.exit(f"[error] negative weight for {name}")
-        atoms.info["MACE_weight"] = w
+        atoms.info["MACE_weight"] = resolved[name]
         # MACE multiplies a per-frame config_weight by the --config_type_weights
         # value, so strip it to avoid double counting. MACE_weight is not a key
         # MACE reads, so it is just a label.
@@ -122,13 +127,12 @@ def apply_weights(xyz_path, json_path, out_xyz, key, fallback_key,
             stripped += 1
         if set_config_type:
             atoms.info["config_type"] = name
-        weights_out[name] = w
 
     write(out_xyz, frames, format="extxyz")
 
     json_out = Path(json_path).with_name(Path(json_path).stem + "_mace_config_type_weights.json")
     with open(json_out, "w") as f:
-        json.dump(weights_out, f)                     # one line: safe for $(cat file)
+        json.dump(resolved, f)                    # one line: safe for $(cat file)
 
     print(f"[apply] wrote {len(frames)} frames -> {out_xyz}")
     print(f"[apply] wrote {json_out}")
@@ -150,7 +154,7 @@ def main():
 
     pa = sub.add_parser("apply")
     pa.add_argument("xyz"); pa.add_argument("json"); pa.add_argument("out_xyz")
-    pa.add_argument("--default-weight", type=float, default=None)
+    pa.add_argument("--default-weight", type=float, default=1.0)
     pa.add_argument("--keep-config-type", action="store_true",
                     help="do not overwrite config_type with the group name")
 

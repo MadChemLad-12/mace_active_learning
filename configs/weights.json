@@ -2,12 +2,12 @@
   "2pttopoh": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 0.1
   },
   "5PtGraph_sol_initial": {
     "count": 4,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 0.1
   },
   "A5_CSIRO_initial": {
     "count": 2,
@@ -237,12 +237,12 @@
   "FORCED_5PtGraph_sol": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.1
   },
   "FORCED_7PtGraph_sol": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.1
   },
   "FORCED_Chair4x4": {
     "count": 1,
@@ -737,17 +737,17 @@
   "Graph0.375Vac_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.1
   },
   "Graph3V_initial": {
     "count": 4,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.1
   },
   "Graph_initial": {
     "count": 4,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.1
   },
   "Naf0.0Pt": {
     "count": 6,
@@ -862,87 +862,87 @@
   "Pt100Naf_initial": {
     "count": 13,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt100Naf_vac": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt100Naf_vac_initial": {
     "count": 15,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt100close": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt100close_initial": {
     "count": 13,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt100close_vac": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt100close_vac_initial": {
     "count": 16,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt110close_initial": {
     "count": 7,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt110close_oxo_initial": {
     "count": 10,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt110close_vac_oxo_initial": {
     "count": 10,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt110naf_vac_oxo_initial": {
     "count": 3,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt211close": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt211close_initial": {
     "count": 6,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt211close_oxo_initial": {
     "count": 5,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt211close_oxo_vac": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt211close_oxo_vac_initial": {
     "count": 6,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "Pt4_SW_CO2Chair4x4_initial": {
     "count": 5,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "PtNafSO3product_initial": {
     "count": 1,
@@ -957,7 +957,7 @@
   "PtOso3_chair_initial": {
     "count": 16,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.3
   },
   "PtOso3sol_chair_initial": {
     "count": 18,
@@ -967,22 +967,22 @@
   "PtSWoxo_initial": {
     "count": 10,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.3
   },
   "Pt_exp_Chair_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.3
   },
   "Pt_oxi_Chair_initial": {
     "count": 2,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.1
   },
   "Pt_vac_Chair_initial": {
     "count": 3,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.1
   },
   "Ptcluster_Chair_initial": {
     "count": 2,
@@ -1247,17 +1247,17 @@
   "oc25_pt": {
     "count": 31,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 0.7
   },
   "pt100_monolayer_initial": {
     "count": 16,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "pt110_monolayer_initial": {
     "count": 5,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.5
   },
   "pt3o4": {
     "count": 1,
@@ -1377,7 +1377,7 @@
   "reico_random": {
     "count": 290,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 0.5
   },
   "simple_anti_0_initial": {
     "count": 2,
