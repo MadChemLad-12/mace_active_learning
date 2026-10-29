@@ -47,17 +47,20 @@ from src.active_pipeline import (
     parse_stress_from_out,
     _cp2k_output_is_complete,
     _write_submission_script,
+    select_uncertain_frames,
     CP2K_TIMEOUT,
     HA_TO_EV,
-    HA_BOHR_TO_EV_ANG,
+    HA_BOHR_TO_EV_ANG
+    
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG — only things specific to the validation recalculation
 # ─────────────────────────────────────────────────────────────────────────────
 
-INPUT_XYZ     = "validate.xyz"
-OUTPUT_XYZ    = "validate_corrected.xyz"
+INPUT_XYZ     = "/home/h.jack/MACE_train/inari/structures/merged_validation_pred.xyz"
+OUTPUT_XYZ    = "validate_dataset.xyz"
+SELECTED_XYZ  = "fps-frames.xyz"
 VAL_DIR       = Path("VAL")
 JOB_PREFIX    = "val"
 
@@ -265,10 +268,20 @@ def main():
     group.add_argument("--parse", action="store_true",
                        help="Parse completed CP2K outputs → OUTPUT_XYZ")
     group.add_argument("--all",   action="store_true",
-                       help="Write inputs, run CP2K locally, then parse")
+                       help="Write inputs, run CP2K locally, then parse"),
+    parser.add_argument("--fps", type=int, default=None,
+                       help="Number of structures to use from input file."
+                       " Does not triggure on --all"),
+    parser.add_argument("--force-threshold", type=float, default=None)
+    
+    parser.add_argument("--cpus", type=int, default=8,
+                       help="Number of cpus to use during cp2k run")
     args = parser.parse_args()
 
     # ── safety: never overwrite a completed validation set silently ───────
+    if not (args.write or args.parse or args.all or args.fps):
+        parser.error("choose --write, --parse, --all or --fps N")
+    
     if (args.parse or args.all) and Path(OUTPUT_XYZ).exists():
         ans = input(f"[?] {OUTPUT_XYZ} already exists. Overwrite? [y/N]: ")
         if ans.strip().lower() != "y":
@@ -278,19 +291,34 @@ def main():
     print(f"[->] Reading: {INPUT_XYZ}")
     frames = read(INPUT_XYZ, index=":")
     print(f"[+]  Frames: {len(frames)}")
+    
+    if args.fps:
+        print("\n── Sampling dataset ──────────────────────────────")
+        from mace.calculators import MACECalculator
 
+        calc = MACECalculator(model_paths="/home/h.jack/MACE_train/mace_active_learning/mace-mp-0b3-medium.model",
+                            device="cuda", default_dtype="float64")                        # build once, reuse
+        frames = select_uncertain_frames(frames, n_select=int(args.fps), calc = calc,
+                                        force_threshold=args.force_threshold)
+        for a in frames:
+            a.calc = calc                      # strip MACE results before CP2K
+        write(SELECTED_XYZ, frames)            # reproducible for --parse later
+        print(f"FPS selected {len(frames)} frames → {SELECTED_XYZ}")
+        
+    # ── Steps ─────────────────────────────────────────────────────
+    missing_jobs = []
     if args.write or args.all:
-        print("\n── STEP 1: Writing inputs ──────────────────────────────────")
+        print("\n── STEP 1: Writing inputs ───────────────────────────")
         all_jobs, missing_jobs = step_write(frames)
 
-        if args.all and missing_jobs:
-            print("\n── STEP 2: Running CP2K locally ────────────────────────────")
-            import subprocess
-            submit = VAL_DIR / "submit_missing.sh"
-            subprocess.run(["bash", str(submit)], check=True)
+    if args.all and missing_jobs:
+        print("\n── STEP 2: Running CP2K locally ─────────────────────")
+        import subprocess
+        submit = VAL_DIR / "submit_missing.sh"
+        subprocess.run(["bash", str(submit)], str(args.cpu), check=True)
 
     if args.parse or args.all:
-        print("\n── STEP 3: Parsing outputs ─────────────────────────────────")
+        print("\n── STEP 3: Parsing outputs ──────────────────────────")
         step_parse(frames)
 
 
