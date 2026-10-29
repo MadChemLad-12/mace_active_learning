@@ -1,0 +1,5 @@
+outs:
+- md5: e886a9101660c125fa04f524bd8cf999
+  size: 17865100
+  hash: md5
+  path: training_clean_v2.xyz

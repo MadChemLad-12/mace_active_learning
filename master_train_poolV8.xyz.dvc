@@ -1,0 +1,5 @@
+outs:
+- md5: 4a9c3df1cac3ffd6744b4254f8ec3cdb
+  size: 23871094
+  hash: md5
+  path: master_train_poolV8.xyz

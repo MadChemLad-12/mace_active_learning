@@ -1,0 +1,5 @@
+[core]
+    autostage = true
+    remote = workstation_store
+['remote "workstation_store"']
+    url = ../ssh:/user@100.99.60.56/home/user/dvc-remote-storage
