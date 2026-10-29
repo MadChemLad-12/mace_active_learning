@@ -45,7 +45,7 @@ class ActivePipelineConfig:
     })
 
     # --- REICO (random imaginary-chemical box) sampling ---
-    reico_sampling: bool = True
+    reico_sampling: bool = False
     reico_num: int = 10               # random boxes generated per round
     reico_min_atoms: int = 20
     reico_max_atoms: int = 60
@@ -53,7 +53,7 @@ class ActivePipelineConfig:
     reico_min_dist_scale: float = 1.2 # scales (r_cov_a + r_cov_b) per-pair min distance
 
     # --- Committee_models ---
-    use_committee: bool = True
+    use_committee: bool = False
     committee_models: List[str] = field(default_factory=list)
     committee_head: Optional[str] = "Default"  # must exist in every listed model
     ts_neighbors: int = 1           # Number of neighbors to use for the TS uncertainty metric (default: 1)

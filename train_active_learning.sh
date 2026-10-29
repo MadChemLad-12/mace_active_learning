@@ -194,6 +194,7 @@ print(e0)
 
 echo "ATOMIC_NUMBERS=$ATOMIC_NUMBERS"
 echo "E0_VALUES=$E0_VALUES"
+echo
 
 # Path to parity plot script
 PARITY_SCRIPT="${MACE_PATH}/analysis/plot_parity.py"
@@ -294,6 +295,7 @@ mace_run_train \
     --pt_train_file="mp" \
     --num_samples_pt="$NUM_SAMPLES_PT" \
     --ema \
+    --loss="universal" \
     --ema_decay=0.99 \
     --pin_memory=True \
     --device=cuda \
@@ -410,6 +412,7 @@ section "STEP 6 — Round ${ROUND} complete"
 
 log_summary "OK" "Round $ROUND finished. Active model: $FINAL_MODEL"
 log_info "===== MACE Training Run Finished: $(date '+%Y%m%d_%H%M') ====="
+cp *.log logs/
 
 NEXT_ROUND=$((ROUND + 1))
 
