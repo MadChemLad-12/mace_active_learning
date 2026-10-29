@@ -33,10 +33,6 @@ RESTART/
 # Large XYZ pools are tracked by DVC or stored externally.
 # Commit configs and small example sets only.
 master_train_pool.xyz
-master_train_pool_*.xyz
-training_clean.xyz
-training_bad.xyz
-held_out.xyz
 al_selected_round*.xyz
 al_cp2k_results_round*.xyz
 training_data/
@@ -65,7 +61,6 @@ train_V*_*.log
 .idea/
 .vscode/
 *.swp
-config.local.sh
 *.sif
 settings.json
 launch.json
