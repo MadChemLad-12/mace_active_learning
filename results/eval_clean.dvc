@@ -1,0 +1,6 @@
+outs:
+- md5: 57da7a7d74d2f0bf922b0b1eea5ac838.dir
+  size: 640753
+  nfiles: 4
+  hash: md5
+  path: eval_clean

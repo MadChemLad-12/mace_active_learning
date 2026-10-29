@@ -149,7 +149,7 @@ EVAL_CONFIGS="${EVAL_CONFIGS}"
 # Training hyperparameters
 VALIDATION_FRACTION="${VALIDATION_FRACTION:-0.1}"
 BATCH_SIZE="${BATCH_SIZE:-4}"
-LR="${LR:-0.0001}"
+LR="${LR:-0.0005}"
 MAX_EPOCHS="${MAX_EPOCHS:-150}"
 SWA_START="${SWA_START:-100}"
 PATIENCE="${PATIENCE:-30}"
@@ -295,7 +295,6 @@ mace_run_train \
     --pt_train_file="mp" \
     --num_samples_pt="$NUM_SAMPLES_PT" \
     --ema \
-    --loss="universal" \
     --ema_decay=0.99 \
     --pin_memory=True \
     --device=cuda \

@@ -101,22 +101,22 @@
   },
   "DB02_150Master_126.xyz_initial_opt_initial": {
     "count": 1,
-    "current_weight": null,
+    "current_weight": 0.5,
     "MACE_weight": 0.5
   },
   "DB02_150Master_132.xyz_initial_opt_initial": {
     "count": 1,
-    "current_weight": null,
+    "current_weight": 0.5,
     "MACE_weight": 0.5
   },
   "DB02_150Master_144.xyz_initial_opt_initial": {
-    "count": 4,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 0.5,
     "MACE_weight": 0.5
   },
   "DB02_150Master_55.xyz_initial_opt_initial": {
-    "count": 3,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 0.5,
     "MACE_weight": 0.5
   },
   "DissolvedO2_Nafion": {
@@ -243,21 +243,6 @@
     "count": 1,
     "current_weight": null,
     "MACE_weight": 1.1
-  },
-  "FORCED_Chair4x4": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 1.5
-  },
-  "FORCED_Chair4x4_sol": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 1.5
-  },
-  "FORCED_Chair4x4sat": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 1.5
   },
   "FORCED_Chair4x4sat_sol": {
     "count": 1,
@@ -469,11 +454,6 @@
     "current_weight": null,
     "MACE_weight": 1.0
   },
-  "FORCED_Graphmono4x4x2": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 0.1
-  },
   "FORCED_Naf0.25PtO2_neb_img00": {
     "count": 1,
     "current_weight": null,
@@ -649,11 +629,6 @@
     "current_weight": null,
     "MACE_weight": 1.3
   },
-  "FORCED_Pt_particle_2_0": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 0.5
-  },
   "FORCED_Pt_particle_3_0": {
     "count": 1,
     "current_weight": null,
@@ -713,36 +688,6 @@
     "count": 1,
     "current_weight": null,
     "MACE_weight": null
-  },
-  "FORCED_Zig4x4": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 1.5
-  },
-  "FORCED_Zig4x4_sol": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 1.5
-  },
-  "FORCED_Zig4x4sat": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 1.5
-  },
-  "Graph0.375Vac_initial": {
-    "count": 1,
-    "current_weight": null,
-    "MACE_weight": 1.1
-  },
-  "Graph3V_initial": {
-    "count": 4,
-    "current_weight": null,
-    "MACE_weight": 1.1
-  },
-  "Graph_initial": {
-    "count": 4,
-    "current_weight": null,
-    "MACE_weight": 1.1
   },
   "Naf0.0Pt": {
     "count": 6,
@@ -855,83 +800,88 @@
     "MACE_weight": 0.7
   },
   "Pt100Naf_initial": {
-    "count": 13,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt100Naf_vac": {
     "count": 1,
-    "current_weight": null,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt100Naf_vac_initial": {
-    "count": 15,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt100close": {
     "count": 1,
-    "current_weight": null,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt100close_initial": {
-    "count": 13,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt100close_vac": {
     "count": 1,
-    "current_weight": null,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt100close_vac_initial": {
-    "count": 16,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt110close_initial": {
-    "count": 7,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt110close_oxo_initial": {
-    "count": 10,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt110close_vac_oxo_initial": {
-    "count": 10,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt110naf_vac_oxo_initial": {
-    "count": 3,
+    "count": 1,
+    "current_weight": 1.0,
+    "MACE_weight": 1.5
+  },
+  "Pt110water_initial": {
+    "count": 1,
     "current_weight": null,
     "MACE_weight": 1.5
   },
   "Pt211close": {
     "count": 1,
-    "current_weight": null,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt211close_initial": {
-    "count": 6,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt211close_oxo_initial": {
-    "count": 5,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt211close_oxo_vac": {
     "count": 1,
-    "current_weight": null,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt211close_oxo_vac_initial": {
-    "count": 6,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "Pt4_Chair4x4_initial": {
@@ -1157,47 +1107,47 @@
   "fps_pt_diss_wet_framesv1_recalibrated": {
     "count": 10,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.0
   },
   "full_anti_12_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "full_anti_15_initial": {
     "count": 3,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "full_anti_9_initial": {
     "count": 3,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "full_cross_12_initial": {
     "count": 7,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "full_cross_15_initial": {
     "count": 10,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "full_cross_9_initial": {
     "count": 2,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "full_para_0_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "full_para_12_initial": {
     "count": 7,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "inoh0.75_optimised_structure": {
     "count": 1,
@@ -1245,13 +1195,13 @@
     "MACE_weight": 0.7
   },
   "pt100_monolayer_initial": {
-    "count": 16,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "pt110_monolayer_initial": {
-    "count": 5,
-    "current_weight": null,
+    "count": 1,
+    "current_weight": 1.0,
     "MACE_weight": 1.5
   },
   "pt3o4": {
@@ -1362,7 +1312,7 @@
   "ptparticlenafclose": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.4
   },
   "ptvn0.375_optimised_structure": {
     "count": 1,
@@ -1370,44 +1320,44 @@
     "MACE_weight": 1.1
   },
   "reico_random": {
-    "count": 276,
+    "count": 36,
     "current_weight": null,
     "MACE_weight": 0.5
   },
   "simple_anti_0_initial": {
     "count": 2,
     "current_weight": null,
-    "MACE_weight": null
-  },
+    "MACE_weight": 1.2
+    },
   "simple_anti_12_initial": {
     "count": 3,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_anti_15_initial": {
     "count": 10,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_anti_9_initial": {
     "count": 2,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_cross_12_initial": {
     "count": 3,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_cross_15_initial": {
     "count": 14,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_cross_9_initial": {
     "count": 4,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_naf_optimised_structure": {
     "count": 1,
@@ -1417,22 +1367,22 @@
   "simple_para_0_initial": {
     "count": 2,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_para_12_initial": {
     "count": 22,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_para_15_initial": {
     "count": 2,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "simple_para_9_initial": {
     "count": 4,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   },
   "so3pt111": {
     "count": 1,
@@ -1442,6 +1392,6 @@
   "solventbulk": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": null
+    "MACE_weight": 1.2
   }
 }

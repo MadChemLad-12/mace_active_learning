@@ -5,7 +5,7 @@ export MACE_DEFAULT_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/co
 export MACE_NEB_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/configs.csv"
 export MACE_NEB_OUTPUT="/home/h.jack/MACE_train/mace_active_learning/neb_comparison"
 export MACE_PATH="/home/h.jack/MACE_train/mace_active_learning/"
-export MACE_TRAINING_PATH="/home/h.jack/MACE_train/mace_active_learning/training_clean_weight.xyz"
+export MACE_TRAINING_PATH="/home/h.jack/MACE_train/mace_active_learning/training_clean_weightV9.xyz"
 export EVAL_CONFIGS="/home/h.jack/MACE_train/mace_active_learning/fps_validate_frames_corrected.xyz"
 export CP2K_LIBDIR="/home/h.jack/MACE_train/mace_active_learning/data/"
 
@@ -24,7 +24,7 @@ export MAX_EPOCHS=600
 export SWA_START=400
 export PATIENCE=70
 export R_MAX=5.0
-export NUM_SAMPLES_PT=2000   # Materials Project frames to mix in during multi-head training
+export NUM_SAMPLES_PT=1200   # Materials Project frames to mix in during multi-head training
 export FLOAT_TYPE="float64"
 
 # Weights
