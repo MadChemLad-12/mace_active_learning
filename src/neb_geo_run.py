@@ -129,9 +129,9 @@ with open(PATH_CSV, newline='') as csvfile:
     reader = csv.DictReader(csvfile)
     CONFIGURATIONS = [
         {
-            "name":    row["Name"],
-            "initial": row["initial"],
-            "final":   row["final"],
+            "name":    row["Name"].strip(),
+            "initial": row["initial"].strip(),
+            "final":   row["final"].strip(),
             "charge":  row.get("charge", None),
             "multiplicity": row.get("multiplicity", None),
             "fragments": row.get("fragments", None)

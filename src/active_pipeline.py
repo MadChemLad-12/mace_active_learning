@@ -288,7 +288,8 @@ def load_candidates(al_input_dir):
 # Step 2 — Select uncertain frames: force scoring + FPS
 # ============================================================
 
-def select_uncertain_frames(frames, n_select, force_threshold=None):
+def select_uncertain_frames(frames, n_select, force_threshold=None,
+                            calc=None, max_pool=None):
     """
     Score by MACE max-force, then apply FPS (on SOAP descriptors) for
     geometric diversity within the high-uncertainty candidate pool.
@@ -297,27 +298,33 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
     # --- Score ---
     scores = []
     print("\nScoring frames by MACE max force...")
-    for atoms in frames:
-        if atoms.calc is not None:
-            try:
-                f = atoms.get_forces()
-                scores.append(float(np.max(np.linalg.norm(f, axis=1))))
-            except Exception:
-                print(f"  [!] Frame {atoms.info.get('system_type','?')} has no calculator — skipping score.")
-                scores.append(0.0)
-        if f == 0.0:
-            print(f"  [!] Frame {atoms.info.get('system_type','?')} has no forces — skipping score.")
+    for i, atoms in enumerate(frames):
+        atoms.info.setdefault("orig_index", i)      # keep original frame id
+        if calc is not None:
+            atoms.calc = calc
+        if atoms.calc is None:
+            print(f"  [!] Frame {i} has no calculator — score 0.")
+            scores.append(0.0)
+            continue
+        try:
+            f = atoms.get_forces()
+            scores.append(float(np.max(np.linalg.norm(f, axis=1))))
+        except Exception as e:
+            print(f"  [!] Frame {i}: force evaluation failed ({e}) — score 0.")
             scores.append(0.0)
     scores = np.array(scores)
 
     # Pre-filter: prefer frames above threshold, fall back to top-N if too few
+    order = np.argsort(scores)[::-1]
     print(f"\nPre-filtering candidates with force threshold: {force_threshold} eV/Å")
     if force_threshold is not None:
-        candidates = np.where(scores > force_threshold)[0]
+        candidates = order[scores[order] > force_threshold]
         if len(candidates) < n_select:
-            candidates = np.argsort(scores)[::-1][:n_select * 2]
+            candidates = order[:n_select * 2]
     else:
-        candidates = np.argsort(scores)[::-1][:n_select * 2]
+        candidates = order[:n_select * 2]
+    if max_pool is not None:
+        candidates = candidates[:max_pool]
 
     if len(candidates) <= n_select:
         return [frames[i] for i in candidates]
@@ -325,18 +332,19 @@ def select_uncertain_frames(frames, n_select, force_threshold=None):
     # --- FPS for diversity, SOAP features, computed ONLY on the
     #     candidate pool (not the full trajectory) so pre-filtering
     #     actually saves the work it's meant to save ---
-    print(f"\nApplying FPS to {len(candidates)} candidates (force threshold: {force_threshold})...")
+    print(f"\nFPS on {len(candidates)} candidates...")
     candidate_frames = [frames[i] for i in candidates]
-    features = build_soap_features(candidate_frames)
+    features = np.asarray(build_soap_features(candidate_frames))
 
-    selected   = [0]                                   # index into candidates/features
-    min_dists  = np.full(len(candidates), np.inf)
-
+    selected  = [0]                                 # highest-force frame
+    min_dists = np.full(len(candidates), np.inf)
     for _ in range(n_select - 1):
-        dists     = np.linalg.norm(features - features[selected[-1]], axis=1)
-        min_dists = np.minimum(min_dists, dists)
+        d = np.linalg.norm(features - features[selected[-1]], axis=1)
+        min_dists = np.minimum(min_dists, d)
         selected.append(int(np.argmax(min_dists)))
-    print(f"  Selected candidate indices: {[candidates[i] for i in selected]}")
+
+    print(f"  Selected original frames: "
+          f"{[frames[candidates[i]].info['orig_index'] for i in selected]}")
     return [frames[candidates[i]] for i in selected]
 
 # ============================================================
@@ -1925,7 +1933,7 @@ def run_round(config: ActivePipelineConfig):
     from src.al_selection import load_committee, select_by_committee, ScoreCache, make_cache_tag
 
     print(f"\n{'='*60}")
-    print(f"  Active Learning Round {config.round}")
+    print(f"  Active Learning Round {config.round}") 
     print(f"  Committee: {'ON' if config.use_committee else 'OFF (single model)'}")
     for p in config.committee_models:
         print(f"    {p}")
