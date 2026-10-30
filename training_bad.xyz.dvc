@@ -1,5 +1,5 @@
 outs:
-- md5: aa08d8e3ddfdfdf6a3c89d52a55ad122
-  size: 5010879
+- md5: b4e8542074b648baccbb41c3b97b3c29
+  size: 5848768
   hash: md5
   path: training_bad.xyz

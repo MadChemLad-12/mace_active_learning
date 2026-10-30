@@ -1,0 +1,6 @@
+outs:
+- md5: f2a354a09b88fbc293de0143993dae57.dir
+  size: 14457358
+  nfiles: 6
+  hash: md5
+  path: eval_mean_foundation

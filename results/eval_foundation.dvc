@@ -1,0 +1,6 @@
+outs:
+- md5: 87a98074413b40d5674c23bc95486ae2.dir
+  size: 14448662
+  nfiles: 6
+  hash: md5
+  path: eval_foundation

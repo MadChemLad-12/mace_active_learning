@@ -42,11 +42,16 @@ def parse_args():
     p.add_argument("--outdir", type=str, required=True, help="Where to place output files")
     p.add_argument("--is_foundation", action="store_true",
                    help="Model is a foundation model: remove the energy offset before computing errors")
+    p.add_argument("--align", action="store_true",
+                   help="Also remove the energy offset for a NON-foundation model (like-for-like comparison "
+                        "with a shifted foundation baseline, or to find where a constant offset comes from). "
+                        "With --shift_mode e0 the 'source' E0s are the ones stored in --model")
     p.add_argument("--shift_mode", choices=["element", "mean", "e0"], default="element",
                    help="Offset removal for --is_foundation: element = per-element least-squares fit "
                         "(default), mean = constant total shift, e0 = exact E0 difference")
     p.add_argument("--e0_json", type=str,
-                   help="(shift_mode e0) E0s of your CP2K-trained model: {atomic number: eV}")
+                   help="E0s of your CP2K labels / fine-tuned model: {atomic number: eV}. Needed for "
+                        "--shift_mode e0; for any model it also enables the atomization-energy report")
     p.add_argument("--foundation_e0_json", type=str,
                    help="(shift_mode e0) foundation model E0s as json; alternative to reading them from "
                         "--foundation_model / --model")
@@ -69,7 +74,7 @@ def parse_args():
         p.error("use either --eval_xyz, or --test_xyz together with --model, not both")
     if not args.eval_xyz and not (args.model and args.test_xyz):
         p.error("provide --eval_xyz, or both --test_xyz and --model")
-    if args.is_foundation and args.shift_mode == "e0":
+    if (args.is_foundation or args.align) and args.shift_mode == "e0":
         if not args.e0_json:
             p.error("--shift_mode e0 needs --e0_json")
         if not (args.foundation_e0_json or args.foundation_model or args.model):
@@ -175,9 +180,14 @@ def align_energies(frames, dft_e, mace_e, mode, e0_target=None, e0_source=None):
     syms = [chemical_symbols[z] for z in zs]
     rank = int(np.linalg.matrix_rank(counts))
     fit, *_ = np.linalg.lstsq(counts, delta, rcond=None)
+    n_distinct = len({tuple(r) for r in counts})
     if rank < len(zs):
         print(f"WARNING: composition matrix rank {rank} < {len(zs)} elements; fitted per-element shifts "
               "are not unique (the energy residuals are still valid).")
+    if mode == "element" and rank >= n_distinct:
+        print(f"WARNING: only {n_distinct} distinct composition(s) and the fit has rank {rank}: the shift "
+              "absorbs the mean offset of every composition, so the energy errors below only measure "
+              "scatter WITHIN each composition. Prefer --shift_mode e0.")
 
     if mode == "element":
         return mace_e + counts @ fit, {"mode": "element", "rank": rank,
@@ -190,10 +200,21 @@ def align_energies(frames, dft_e, mace_e, mode, e0_target=None, e0_source=None):
     e0_diff = np.array([e0_target[z] - e0_source[z] for z in zs])
     adjusted = mace_e + counts @ e0_diff
 
-    print("  per-element shift: exact E0 difference vs fitted (eV)")
-    for s, d, f in zip(syms, e0_diff, fit):
-        print(f"    {s:3s} E0 diff {d:14.4f}   fitted {f:14.4f}   fitted - E0 diff {f - d:10.4f}")
+    if rank >= len(zs):
+        print("  per-element shift: exact E0 difference vs fitted (eV)")
+        for s, d, f in zip(syms, e0_diff, fit):
+            print(f"    {s:3s} E0 diff {d:14.4f}   fitted {f:14.4f}   fitted - E0 diff {f - d:10.4f}")
+    else:
+        print("  fitted-vs-E0 table skipped: the per-element fit is under-determined for this test set "
+              f"(rank {rank} < {len(zs)} elements), so the fitted numbers carry no information.")
     resid_pa = (dft_e - adjusted) / n_atoms * 1000
+    groups = defaultdict(list)
+    for i, a in enumerate(frames):
+        groups[a.get_chemical_formula()].append(i)
+    print("  residual (DFT - MACE after E0 alignment) per composition:")
+    for formula, idx in groups.items():
+        r = (dft_e - adjusted)[idx]
+        print(f"    n={len(idx):3d}  mean {np.mean(r):12.3f} eV = {np.mean(resid_pa[idx]):10.1f} meV/atom   {formula}")
     print(f"  mean residual after E0 alignment: {np.mean(resid_pa):.2f} meV/atom "
           f"(std {np.std(resid_pa):.2f})")
     return adjusted, {
@@ -255,8 +276,8 @@ def main():
         eval_xyz, args.ref_energy_key, args.ref_forces_key, args.info_prefix)
     n_atoms = np.array([len(a) for a in frames])
 
-    if args.is_foundation:
-        print("Removing energy offset for the foundation model ...")
+    if args.is_foundation or args.align:
+        print("Removing energy offset ...")
         e0_target = e0_source = None
         if args.shift_mode == "e0":
             e0_target = load_e0_json(args.e0_json)
@@ -277,6 +298,29 @@ def main():
 
     e_stats = error_stats(dft_e_pa, mace_e_pa)   # meV/atom
     f_stats = error_stats(dft_f_flat, mace_f_flat)  # meV/A
+    # atomization energy per atom = (E - sum E0)/N: removes the huge composition spread of absolute
+    # energies, so R2 means something and the E0 json can be sanity-checked against the DFT labels
+    ae_stats = None
+    if args.e0_json:
+        e0_cp2k = load_e0_json(args.e0_json)
+        zs, counts = composition_matrix(frames)
+        miss = [chemical_symbols[z] for z in zs if z not in e0_cp2k]
+        if miss:
+            sys.exit(f"--e0_json has no E0 for element(s) {miss}")
+        e0_vec = np.array([e0_cp2k[z] for z in zs])
+        ref_ae = (dft_e - counts @ e0_vec) / n_atoms
+        pred_ae = (mace_e_adj - counts @ e0_vec) / n_atoms
+        ae_stats = error_stats(ref_ae, pred_ae)
+        ae_stats["ref_std_eV_per_atom"] = float(np.std(ref_ae))
+        print(f"\nAtomization energy (E - sum E0)/N, reference values per composition:")
+        by_formula = defaultdict(list)
+        for i, a in enumerate(frames):
+            by_formula[a.get_chemical_formula()].append(i)
+        for formula, idx in by_formula.items():
+            print(f"  n={len(idx):3d}  DFT {np.mean(ref_ae[idx]):8.3f}  MACE {np.mean(pred_ae[idx]):8.3f} eV/atom   {formula}")
+        print("  (typical molecular/ionic systems sit at roughly -3 to -6 eV/atom; values far outside "
+              "that range point to a bad E0 for one of the elements in that composition)")
+
     energy_pass = e_stats["rmse"] <= args.energy_threshold
     force_pass = f_stats["rmse"] <= args.force_threshold
     usable = bool(energy_pass and force_pass)
@@ -286,7 +330,7 @@ def main():
     for i, atoms in enumerate(frames):
         rows.append({
             "index": i,
-            "config_type": atoms.info.get("config_type", f"Index_{i}"),
+            "config_type": atoms.info.get("config_type", atoms.get_chemical_formula()),
             "n_atoms": int(n_atoms[i]),
             "energy_error_mev_per_atom": float((mace_e_pa[i] - dft_e_pa[i]) * 1000),
             "force_rmse_mev": float(np.sqrt(np.mean((mace_f[i] - dft_f[i]) ** 2)) * 1000),
@@ -324,7 +368,9 @@ def main():
 
     # ---- plots ----
     color = "#ff7f0e" if args.is_foundation else "#1f77b4"
-    title_model = "Foundation (offset removed)" if args.is_foundation else "Fine-tuned"
+    title_model = "Foundation" if args.is_foundation else "Fine-tuned"
+    if args.is_foundation or args.align:
+        title_model += " (offset removed)"
     scatter_plot(dft_e_pa, mace_e_pa, title_model, "Energy per Atom", "eV/atom", "meV/atom",
                  args.outdir, tag, e_stats, energy_pass, color)
     scatter_plot(dft_f_flat, mace_f_flat, title_model, "Force Components", "eV/A", "meV/A",
@@ -333,11 +379,13 @@ def main():
     # ---- summary ----
     summary = {
         "model": args.model, "eval_xyz": eval_xyz, "n_frames": len(frames),
-        "is_foundation": args.is_foundation, "shift": shift_info,
+        "is_foundation": args.is_foundation, "aligned": bool(args.is_foundation or args.align),
+        "shift": shift_info,
         "energy": {**e_stats, "units": "meV/atom (MAE, RMSE)", "threshold_rmse": args.energy_threshold,
                    "pass": bool(energy_pass)},
         "forces": {**f_stats, "units": "meV/A (MAE, RMSE)", "threshold_rmse": args.force_threshold,
                    "pass": bool(force_pass)},
+        "atomization_energy": ae_stats,
         "usable": usable, "by_config_type": by_type,
     }
     with open(os.path.join(args.outdir, f"summary_{tag}.json"), "w") as fh:
@@ -346,6 +394,10 @@ def main():
     print(f"\nFrames: {len(frames)}")
     print(f"Energy: MAE {e_stats['mae']:.2f}  RMSE {e_stats['rmse']:.2f} meV/atom  "
           f"R2 {e_stats['r2']:.4f}  ({'PASS' if energy_pass else 'FAIL'} <= {args.energy_threshold})")
+    print("  (energy R2 above is on absolute per-atom energies and is dominated by composition spread)")
+    if ae_stats:
+        print(f"Atomization energy: MAE {ae_stats['mae']:.2f}  RMSE {ae_stats['rmse']:.2f} meV/atom  "
+              f"R2 {ae_stats['r2']:.4f}  (std of reference {ae_stats['ref_std_eV_per_atom']:.3f} eV/atom)")
     print(f"Forces: MAE {f_stats['mae']:.1f}  RMSE {f_stats['rmse']:.1f} meV/A  "
           f"R2 {f_stats['r2']:.4f}  ({'PASS' if force_pass else 'FAIL'} <= {args.force_threshold})")
     print(f"Usable: {usable}")

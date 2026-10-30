@@ -1,0 +1,6 @@
+outs:
+- md5: 0fc45cd9b6c0a6735198c532083372b3.dir
+  size: 14441970
+  nfiles: 6
+  hash: md5
+  path: eval_finetuneV8

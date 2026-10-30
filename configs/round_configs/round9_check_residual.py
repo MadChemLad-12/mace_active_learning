@@ -12,7 +12,7 @@ class CheckResidualConfig:
     round: int = 9
     apply_d3: bool = False          # apply D3 correction to MACE energies
     max_force_ref: float = 12     # eV/Å, max force for a structure to be valid # 45 was the old value and 15 did kind well
-    max_rmse: float = 800.0       # meV/Å, max RMSE force for a structure to be valid
+    max_rmse: float = 500.0       # meV/Å, max RMSE force for a structure to be valid
     non_pt_thresh: float = 2.3     # Å, z-height threshold for non-Pt atoms entering slab
     max_count: int = 800           # max atom count allowed in a system
     
@@ -59,17 +59,17 @@ class CheckResidualConfig:
         ct = (config_type or "").lower()  # case insensitive
         
         if   "reico_random" in ct:                 # Reico samples
-            rmse_thresh = 500
+            rmse_thresh = 300
         elif   "dry" in ct:
-            rmse_thresh = 700
+            rmse_thresh = 400
         elif   "Pt" in symbols_set and pt_count > 3:           # Pt slab
-            rmse_thresh = 700
+            rmse_thresh = 400
         elif "P" in symbols_set or "N" in symbols_set:
-            rmse_thresh = 800
+            rmse_thresh = 500
         elif set(symbols_set) <= {"H", "O"}:                      # bulk water
             rmse_thresh = 400
         elif any(s in symbols_set for s in ("F", "S")):      # Nafion
-            rmse_thresh = 800
+            rmse_thresh = 500
         else:                                                 # dissolved Pt / fallback
             rmse_thresh = CONFIG.max_rmse
         return rmse_thresh

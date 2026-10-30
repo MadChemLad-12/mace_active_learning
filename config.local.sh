@@ -5,7 +5,7 @@ export MACE_DEFAULT_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/co
 export MACE_NEB_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/configs.csv"
 export MACE_NEB_OUTPUT="/home/h.jack/MACE_train/mace_active_learning/neb_comparison"
 export MACE_PATH="/home/h.jack/MACE_train/mace_active_learning/"
-export MACE_TRAINING_PATH="/home/h.jack/MACE_train/mace_active_learning/training_clean_weightV9.xyz"
+export MACE_TRAINING_PATH="/home/h.jack/MACE_train/mace_active_learning/training_clean_weightV9.4.xyz"
 export EVAL_CONFIGS="/home/h.jack/MACE_train/mace_active_learning/fps_validate_frames_corrected.xyz"
 export CP2K_LIBDIR="/home/h.jack/MACE_train/mace_active_learning/data/"
 
@@ -34,6 +34,6 @@ export ENERGY_WEIGHT=5
 export STRESS_WEIGHT=0
 # SWA weights
 # I think energy 10 and forces 100 is better for swa
-export FORCES_SWA=100
-export ENERGY_SWA=50
+export FORCES_SWA=120
+export ENERGY_SWA=10
 export STRESS_SWA=0

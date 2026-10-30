@@ -67,7 +67,7 @@ DEFAULT_CELLS = {
 
 # --- E0 reference data file (isolated-atom energies, produced once per
 # round via the E0 calculation step, but the filename convention is stable) ---
-E0_JSON = "configs/E0s.json"
+E0_JSON = "configs/E0s-corrected.json"
 E0_CELL_SIZE = 20.0  # Angstrom, cubic box for isolated-atom E0 calculations
 
 # --- External training-set filename tags that should never be pruned

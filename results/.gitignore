@@ -1,2 +1,7 @@
 /eval_trainingV9.xyz
 /eval_clean
+/eval_element_foundation
+/eval_mean_foundation
+/eval_finetuneV8
+/eval_finetuneV8-align
+/eval_foundation

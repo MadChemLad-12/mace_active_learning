@@ -1,0 +1,5 @@
+outs:
+- md5: 55a5b6ea746b19ec2ee81e9982d6a314
+  size: 3170
+  hash: md5
+  path: summary_finetune.json
