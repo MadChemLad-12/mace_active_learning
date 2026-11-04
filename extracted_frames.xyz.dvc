@@ -1,0 +1,5 @@
+outs:
+- md5: 5c354e61be3663397c676d974a5c0a05
+  size: 129255
+  hash: md5
+  path: extracted_frames.xyz

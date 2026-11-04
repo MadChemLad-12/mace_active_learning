@@ -1,0 +1,5 @@
+outs:
+- md5: 507d4e1c27b696280d0967ea7be1809a
+  size: 18890367
+  hash: md5
+  path: training_clean_weightV9.5.xyz

@@ -83,3 +83,6 @@ MB-pol-104607.xyz
 /mp_finetuning-mace_V9_active_learning_run-421_combined.xyz
 /mp_finetuning-mace_V9_active_learning_run-421.xyz
 /training_clean_weightV9.4.xyz
+/results-train
+/extracted_frames.xyz
+/training_clean_weightV9.5.xyz

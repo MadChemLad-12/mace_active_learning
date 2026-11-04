@@ -147,6 +147,7 @@ fi
 EVAL_CONFIGS="${EVAL_CONFIGS}"
 
 # Training hyperparameters
+LOSS="${LOSS}"
 VALIDATION_FRACTION="${VALIDATION_FRACTION:-0.1}"
 BATCH_SIZE="${BATCH_SIZE:-4}"
 LR="${LR:-0.0005}"
@@ -162,6 +163,7 @@ FORCES_WEIGHT="${FORCES_WEIGHT:-100}"
 ENERGY_WEIGHT="${ENERGY_WEIGHT:-1}"
 STRESS_WEIGHT="${STRESS_WEIGHT:-1}"
 # SWA weights
+SWA_LR="${SWA_LR:-0.0005}"
 FORCES_SWA="${FORCES_SWA:-1000}"
 ENERGY_SWA="${ENERGY_SWA:-10}"
 STRESS_SWA="${STRESS_SWA:-10}"
@@ -266,8 +268,7 @@ mace_run_train \
     --name="$MODEL_NAME" \
     --foundation_model="$FOUNDATION" \
     --train_file="$TRAINING_PATH" \
-    --valid_fraction="$VALIDATION_FRACTION" \
-    --test_file="$EVAL_CONFIGS" \
+    --valid_file="$EVAL_CONFIGS" \
     --default_dtype="$FLOAT_TYPE" \
     --config_type_weights "$CONFIG_TYPE_WEIGHTS" \
     --energy_key="REF_energy" \
@@ -276,6 +277,7 @@ mace_run_train \
     --atomic_numbers="$ATOMIC_NUMBERS" \
     --E0s="$E0_VALUES" \
     --model="MACE" \
+    --loss="$LOSS" \
     --forces_weight="$FORCES_WEIGHT" \
     --energy_weight="$ENERGY_WEIGHT" \
     --stress_weight="$STRESS_WEIGHT" \
@@ -288,6 +290,7 @@ mace_run_train \
     --patience="$PATIENCE" \
     --swa \
     --start_swa "$SWA_START" \
+    --swa_lr="$SWA_LR" \
     --swa_energy_weight="$ENERGY_SWA" \
     --swa_forces_weight="$FORCES_SWA" \
     --swa_stress_weight="$STRESS_SWA" \

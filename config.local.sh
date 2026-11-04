@@ -17,15 +17,16 @@ export PYTHONPATH="${MACE_PATH}src:${PYTHONPATH}"
 
 
 # MACE HYPERPARAMETERS
-export VALIDATION_FRACTION=0.1
-export BATCH_SIZE=4
+export LOSS="universal"
+export VALIDATION_FRACTION=0.0
+export BATCH_SIZE=8
 export LR=0.0005
-export MAX_EPOCHS=600
-export SWA_START=400
+export MAX_EPOCHS=650
+export SWA_START=450
 export PATIENCE=70
-export R_MAX=5.0
-export NUM_SAMPLES_PT=1200   # Materials Project frames to mix in during multi-head training
-export FLOAT_TYPE="float64"
+export R_MAX=6.0
+export NUM_SAMPLES_PT=800   # Materials Project frames to mix in during multi-head training
+export FLOAT_TYPE="float32"
 
 # Weights
 # I think energy 1 and forces 100 is better for start
@@ -34,6 +35,7 @@ export ENERGY_WEIGHT=5
 export STRESS_WEIGHT=0
 # SWA weights
 # I think energy 10 and forces 100 is better for swa
-export FORCES_SWA=120
+export SWA_LR=0.0001
+export FORCES_SWA=100
 export ENERGY_SWA=10
 export STRESS_SWA=0

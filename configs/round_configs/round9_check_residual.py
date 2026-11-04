@@ -65,11 +65,11 @@ class CheckResidualConfig:
         elif   "Pt" in symbols_set and pt_count > 3:           # Pt slab
             rmse_thresh = 400
         elif "P" in symbols_set or "N" in symbols_set:
-            rmse_thresh = 500
+            rmse_thresh = 400
         elif set(symbols_set) <= {"H", "O"}:                      # bulk water
             rmse_thresh = 400
         elif any(s in symbols_set for s in ("F", "S")):      # Nafion
-            rmse_thresh = 500
+            rmse_thresh = 400
         else:                                                 # dissolved Pt / fallback
             rmse_thresh = CONFIG.max_rmse
         return rmse_thresh
