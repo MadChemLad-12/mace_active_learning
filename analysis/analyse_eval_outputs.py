@@ -236,6 +236,23 @@ def error_stats(ref, pred, scale=1000.0):
             "rmse": float(np.sqrt(np.mean(err ** 2)) * scale),
             "r2": r2_score(ref, pred)}
 
+def error_histograms(ref, pred, title_model, metric, units, err_units, outdir, tag, stats, passed):
+    fig, ax = plt.subplots(figsize=(6, 5))
+    err = pred - ref
+    ax.hist(err, bins=50, alpha=0.7, color="blue", edgecolor="black")
+    ax.set_xlabel(f"Error ({err_units})")
+    ax.set_ylabel("Count")
+    status = "Passed threshold" if passed else "Failed threshold"
+    ax.set_title(f"{title_model} - {metric}\n{status}",
+                 color="green" if passed else "red", fontweight="bold")
+    text = (f"MAE: {stats['mae']:.2f} {err_units}\nRMSE: {stats['rmse']:.2f} {err_units}\n"
+            f"R2: {stats['r2']:.4f}")
+    ax.text(0.05, 0.95, text, transform=ax.transAxes, fontsize=10, verticalalignment="top",
+            bbox=dict(boxstyle="round", alpha=0.3))
+    fig.tight_layout()
+    fname = f"Histogram_{metric.lower().replace(' ', '_')}_{tag}.png"
+    fig.savefig(os.path.join(outdir, fname), dpi=300)
+    plt.close(fig)
 
 def scatter_plot(ref, pred, title_model, metric, units, err_units, outdir, tag, stats, passed, color):
     fig, ax = plt.subplots(figsize=(6, 5))
@@ -375,6 +392,10 @@ def main():
                  args.outdir, tag, e_stats, energy_pass, color)
     scatter_plot(dft_f_flat, mace_f_flat, title_model, "Force Components", "eV/A", "meV/A",
                  args.outdir, tag, f_stats, force_pass, color)
+    error_histograms(dft_e_pa, mace_e_pa, title_model, "Energy per Atom", "eV/atom", "meV/atom",
+                     args.outdir, tag, e_stats, energy_pass)
+    error_histograms(dft_f_flat, mace_f_flat, title_model, "Force Components", "eV/A", "meV/A",
+                     args.outdir, tag, f_stats, force_pass)
 
     # ---- summary ----
     summary = {
