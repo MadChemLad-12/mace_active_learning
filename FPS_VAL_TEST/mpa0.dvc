@@ -1,0 +1,6 @@
+outs:
+- md5: fa112a4e8700f26dfffa3f42c99bc45f.dir
+  size: 14622441
+  nfiles: 8
+  hash: md5
+  path: mpa0

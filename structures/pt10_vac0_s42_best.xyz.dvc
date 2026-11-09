@@ -1,0 +1,5 @@
+outs:
+- md5: 028d547db9c69631847f7ccc66b41eec
+  size: 16323
+  hash: md5
+  path: pt10_vac0_s42_best.xyz
