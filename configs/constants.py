@@ -20,8 +20,8 @@ if not LIBDIR:
     )
 
 # MACE MODEL PATHS
-FOUNDATION_MODEL_PATH="/home/h.jack/MACE_train/mace_active_learning/mace-mpa-0-medium.model"
-FINETUNED_MODEL_PATH="/home/h.jack/MACE_train/mace_active_learning/mace_V8_active_learning_stagetwo.model"
+FOUNDATION_MODEL_PATH=os.getenv("MACE_FOUNDATION_MODEL")
+FINETUNED_MODEL_PATH=os.getenv("MACE_FINETUNED_MODEL")
 
 # --- Atomic number mapping ---
 Z_MAP = {"H": 1, "C": 6, "O": 8, "F": 9, "S": 16, "Pt": 78}
@@ -67,7 +67,8 @@ DEFAULT_CELLS = {
 
 # --- E0 reference data file (isolated-atom energies, produced once per
 # round via the E0 calculation step, but the filename convention is stable) ---
-E0_JSON = "configs/E0s-corrected.json"
+FOUNDATION_E0s_JSON = os.getenv("FOUNDATION_E0s_JSON")
+E0_JSON = os.getenv("E0_JSON")
 E0_CELL_SIZE = 20.0  # Angstrom, cubic box for isolated-atom E0 calculations
 
 # --- External training-set filename tags that should never be pruned

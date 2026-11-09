@@ -163,7 +163,7 @@ FORCES_WEIGHT="${FORCES_WEIGHT:-100}"
 ENERGY_WEIGHT="${ENERGY_WEIGHT:-1}"
 STRESS_WEIGHT="${STRESS_WEIGHT:-1}"
 # SWA weights
-SWA="${SWA:-TRUE}"
+SWA="${SWA:-False}"
 SWA_LR="${SWA_LR:-0.0005}"
 FORCES_SWA="${FORCES_SWA:-1000}"
 ENERGY_SWA="${ENERGY_SWA:-10}"
@@ -178,14 +178,24 @@ import json
 from configs.constants import CONFIG_TYPE_WEIGHTS_JSON
 print(json.dumps(json.load(open(CONFIG_TYPE_WEIGHTS_JSON))))
 ")
+export CONFIG_TYPE_WEIGHTS
 
 # Extract ATOMIC_NUMBERS using inline Python
+if [[ "${USE_HEADS,,}" == "true" ]]; then
+ATOMIC_NUMBERS=$(FOUNDATION="$FOUNDATION" python3 - <<'EOF' | tail -n 1
+import os, torch
+m = torch.load(os.environ["FOUNDATION"], map_location="cpu", weights_only=False)
+print([int(z) for z in m.atomic_numbers])
+EOF
+)
+else
 ATOMIC_NUMBERS=$(python3 -c "
 import json
 data = json.load(open('$JSON_FILE'))
-keys = [int(k) for k in data.keys() if k != 'Atomic Number']
-print(keys)
+print([int(k) for k in data.keys() if k != 'Atomic Number'])
 ")
+fi
+[[ -n "$ATOMIC_NUMBERS" ]] || { echo "ATOMIC_NUMBERS is empty"; exit 1; }
 
 # Extract E0_VALUES formatted as a dictionary string
 E0_VALUES=$(python3 -c "
@@ -195,17 +205,7 @@ e0 = {int(k): v for k, v in data.items() if k != 'Atomic Number'}
 print(e0)
 ")
 
-echo "ATOMIC_NUMBERS=$ATOMIC_NUMBERS"
-echo "E0_VALUES=$E0_VALUES"
 echo
-
-# Turn on swa?
-label_swa()
-    if $SWA:
-        return --swa
-    else
-        return 
-
 
 # Path to parity plot script
 PARITY_SCRIPT="${MACE_PATH}/analysis/plot_parity.py"
@@ -268,24 +268,75 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 section "Begin Training"
 
-RESTART_FLAG=""
-if [[ "$RESTART" == "label_swatrue" ]]; then
-    RESTART_FLAG="--restart_latest"
+STAGE_TWO_FLAGS=()
+if [[ "${SWA,,}" == "true" ]]; then
+    STAGE_TWO_FLAGS=(--start_swa "$SWA_START" \
+    --swa_lr="$SWA_LR" \
+    --swa_energy_weight="$ENERGY_SWA" \
+    --swa_forces_weight="$FORCES_SWA" \
+    --swa_stress_weight="$STRESS_SWA" )
+fi
+RESTART_FLAG=()
+[[ "$RESTART" == "true" ]] && RESTART_FLAG=(--restart_latest)
+
+echo "=== Pre-filtering Materials Project replay data for pretraining ==="
+HEADS_ARGUMENTS=()
+if [[ "${USE_HEADS}" == "true" ]]; then
+    mace_finetuning_select --configs_pt="$HOME/.cache/mace/mp_traj_combinedxyz" \
+        --configs_ft="$TRAINING_PATH" \
+        --num_samples="$NUM_SAMPLES_PT" \
+        --subselect=random \
+        --filtering_type=none \
+        --output=filtered_mp_replay.xyz \
+        --device=cuda --default_dtype="$FLOAT_TYPE" --seed=421 \
+        --disallow_random_padding \
+        || { log_error "REPLAY" "mace_finetuning_select" "selection failed"; exit 1; }
+
+cp filtered_mp_replay.xyz filtered_mp_replay_raw.xyz
+ATOMIC_NUMBERS="$ATOMIC_NUMBERS" python3 - <<'EOF' || { log_error "REPLAY" "element filter" "too many replay frames outside element table"; exit 1; }
+import ast, os, sys
+from ase.io import read, write
+allowed = set(ast.literal_eval(os.environ["ATOMIC_NUMBERS"]))
+frames = read("filtered_mp_replay_raw.xyz", ":")
+keep = [a for a in frames if set(a.numbers) <= allowed]
+dropped = len(frames) - len(keep)
+missing = sorted({int(z) for a in frames for z in a.numbers} - allowed)
+print(f"{len(frames)} replay frames, dropping {dropped} (elements outside table: {missing})")
+if dropped > 0.05 * len(frames):
+    sys.exit(1)
+keep[0].get_potential_energy(); keep[0].get_forces()   # labels survived the rewrite
+write("filtered_mp_replay.xyz", keep)
+print(f"kept {len(keep)} frames")
+EOF
+
+    HEADS_STR=$(python3 helpers/make_heads.py "$TRAINING_PATH" filtered_mp_replay.xyz "$E0_JSON" "$FOUNDATION" all) \
+        || { log_error "HEADS" "make_heads.py" "failed to build heads string"; exit 1; }
+    [[ -n "$HEADS_STR" ]] || { log_error "HEADS" "make_heads.py" "empty heads string"; exit 1; }    
+    HEADS_ARGUMENTS=(--foundation_head=Default \
+        --heads="$HEADS_STR")
+    printf "Using multi-head training with the following heads:\n%s\n" "$HEADS_STR"
+    echo "n_elements=$(python3 -c "print(len($ATOMIC_NUMBERS))")"
+    echo "ATOMIC_NUMBERS=$ATOMIC_NUMBERS"
+    echo "E0_VALUES=$E0_VALUES"
+else
+    HEADS_ARGUMENTS=(--energy_key="REF_energy" \
+      --forces_key="REF_forces" \
+      --stress_key="REF_stress" \
+      --E0s="$E0_VALUES" \
+      --pt_train_file=mp \
+      --num_samples_pt="$NUM_SAMPLES_PT" \
+      --train_file="$TRAINING_PATH" \
+      --valid_fraction="$VALIDATION_FRACTION" \
+      --test_file="$EVAL_CONFIGS" )
 fi
 
 mace_run_train \
     --name="$MODEL_NAME" \
+    "${HEADS_ARGUMENTS[@]}" \
     --foundation_model="$FOUNDATION" \
-    --train_file="$TRAINING_PATH" \
-    --valid_fraction="$VALIDATION_FRACTION" \
-    --test_file="$EVAL_CONFIGS" \
     --default_dtype="$FLOAT_TYPE" \
     --config_type_weights "$CONFIG_TYPE_WEIGHTS" \
-    --energy_key="REF_energy" \
-    --forces_key="REF_forces" \
-    --stress_key="REF_stress" \
     --atomic_numbers="$ATOMIC_NUMBERS" \
-    --E0s="$E0_VALUES" \
     --model="MACE" \
     --loss="$LOSS" \
     --forces_weight="$FORCES_WEIGHT" \
@@ -298,21 +349,14 @@ mace_run_train \
     --scheduler="ReduceLROnPlateau" \
     --max_num_epochs="$MAX_EPOCHS" \
     --patience="$PATIENCE" \
-    label_swa() \
-    --start_swa "$SWA_START" \
-    --swa_lr="$SWA_LR" \
-    --swa_energy_weight="$ENERGY_SWA" \
-    --swa_forces_weight="$FORCES_SWA" \
-    --swa_stress_weight="$STRESS_SWA" \
+    "${STAGE_TWO_FLAGS[@]}" \
     --multiheads_finetuning=True \
-    --pt_train_file="mp" \
-    --num_samples_pt="$NUM_SAMPLES_PT" \
     --ema \
     --ema_decay=0.99 \
     --pin_memory=True \
     --device=cuda \
     --seed 421 \
-    $RESTART_FLAG 2>&1 | tee -a "$TRAIN_LOG" 
+    "${RESTART_FLAG[@]}" 2>&1 | tee -a "$TRAIN_LOG"
 
 train_exit=${PIPESTATUS[0]}
 
@@ -322,6 +366,7 @@ if [[ $train_exit -ne 0 ]]; then
     exit 1
 fi
 
+if [[ "${SWA,,}" == "true" ]]; then SWA_MODEL="${MODEL_NAME}_stagetwo.model"; else SWA_MODEL="${MODEL_NAME}.model"; fi
 check_file "$SWA_MODEL" "TRAINING" "post-training model check"
 log_info "Training completed. Model saved: $SWA_MODEL"
 
