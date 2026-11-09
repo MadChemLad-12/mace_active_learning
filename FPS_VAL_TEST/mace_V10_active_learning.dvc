@@ -1,6 +1,5 @@
 outs:
-- md5: d751713988987e9331980363e24189ce.dir
-  size: 0
-  nfiles: 0
+- md5: 9b0ebcdd633c13092a7a51e5b1801ae9.dir
+  nfiles: 1
   hash: md5
   path: mace_V10_active_learning
