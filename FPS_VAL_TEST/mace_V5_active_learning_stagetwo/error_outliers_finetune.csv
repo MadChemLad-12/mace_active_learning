@@ -1,0 +1,21 @@
+ranking_type,rank,index,system_type,n_atoms,energy_error_mev_per_atom,force_rmse_mev
+Worst Energy Errors,1,32,PtHemGraph20*10_initial,421,584.3630224007939,441.91032948388823
+Worst Energy Errors,2,30,Graph_initial,444,581.3958635293659,476.59184294399563
+Worst Energy Errors,3,1,pt8vac0_initial,152,533.4825925821747,275.73659088264463
+Worst Energy Errors,4,2,pt8vac1_initial,151,529.3751230468615,300.7766449859964
+Worst Energy Errors,5,29,PtGraph10*7_initial,487,513.9581167312599,418.34987403864716
+Worst Energy Errors,6,25,PtSWoxo_initial,95,413.9783220154527,489.658587053672
+Worst Energy Errors,7,7,Pt4_SW_CO2Chair4x4_initial,95,358.3120803593829,532.6820112499446
+Worst Energy Errors,8,35,5PtGraph_sol_initial,611,340.41742935630737,286.57068611672634
+Worst Energy Errors,9,33,PtOso3_chair_initial,114,274.7490676699158,2158.2916383101906
+Worst Energy Errors,10,27,PtOso3_chair_initial,114,241.16503725957728,965.8090078585296
+Worst Force Errors,1,33,PtOso3_chair_initial,114,274.7490676699158,2158.2916383101906
+Worst Force Errors,2,27,PtOso3_chair_initial,114,241.16503725957728,965.8090078585296
+Worst Force Errors,3,34,A8_CSIRO_initial,273,195.032179871788,660.4267888099662
+Worst Force Errors,4,7,Pt4_SW_CO2Chair4x4_initial,95,358.3120803593829,532.6820112499446
+Worst Force Errors,5,25,PtSWoxo_initial,95,413.9783220154527,489.658587053672
+Worst Force Errors,6,30,Graph_initial,444,581.3958635293659,476.59184294399563
+Worst Force Errors,7,32,PtHemGraph20*10_initial,421,584.3630224007939,441.91032948388823
+Worst Force Errors,8,29,PtGraph10*7_initial,487,513.9581167312599,418.34987403864716
+Worst Force Errors,9,26,PtOso3sol_chair_initial,240,116.74453799844287,415.43103771691915
+Worst Force Errors,10,6,Ptparticle_oxi_so3_chari_initial,138,217.4701454651995,378.20887228249234

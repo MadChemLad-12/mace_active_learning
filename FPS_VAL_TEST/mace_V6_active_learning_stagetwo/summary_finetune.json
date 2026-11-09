@@ -1,0 +1,270 @@
+{
+  "model": "/home/h.jack/MACE_train/mace_active_learning/model/mace_V6_active_learning_stagetwo.model",
+  "eval_xyz": "FPS_VAL_TEST/mace_V6_active_learning_stagetwo/eval_finetune.xyz",
+  "n_frames": 430,
+  "is_foundation": false,
+  "aligned": false,
+  "shift": {
+    "mode": "none"
+  },
+  "energy": {
+    "mae": 8.930253879525361,
+    "rmse": 12.931693971436173,
+    "r2": 0.9999999990693494,
+    "units": "meV/atom (MAE, RMSE)",
+    "threshold_rmse": 10.0,
+    "pass": false
+  },
+  "forces": {
+    "mae": 83.1855222171043,
+    "rmse": 142.92106526470758,
+    "r2": 0.9565820650860528,
+    "units": "meV/A (MAE, RMSE)",
+    "threshold_rmse": 50.0,
+    "pass": false
+  },
+  "atomization_energy": null,
+  "usable": false,
+  "by_system_type": {
+    "FORCED_Close0.75PtO_neb_img05": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -3.664458798539272,
+      "energy_rmse_mev_per_atom": 3.664458798539272,
+      "force_rmse_mev": 131.19150127979435
+    },
+    "pt8vac0_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -28.24643702308549,
+      "energy_rmse_mev_per_atom": 28.24643702308549,
+      "force_rmse_mev": 162.2685485615227
+    },
+    "pt8vac1_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -17.525746158412403,
+      "energy_rmse_mev_per_atom": 17.525746158412403,
+      "force_rmse_mev": 212.02216706114746
+    },
+    "Pt211close_oxo_vac_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 9.955534207506389,
+      "energy_rmse_mev_per_atom": 9.955534207506389,
+      "force_rmse_mev": 209.00531017524295
+    },
+    "Pt110close_oxo_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -5.692946771205243,
+      "energy_rmse_mev_per_atom": 5.692946771205243,
+      "force_rmse_mev": 249.36612566985525
+    },
+    "Pt100Naf_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 25.119389804217462,
+      "energy_rmse_mev_per_atom": 25.119389804217462,
+      "force_rmse_mev": 237.14245200999648
+    },
+    "Ptparticle_oxi_so3_chari_initial": {
+      "n": 2,
+      "energy_bias_mev_per_atom": 42.18318936014498,
+      "energy_rmse_mev_per_atom": 42.23031584060785,
+      "force_rmse_mev": 321.5054604104604
+    },
+    "Pt4_SW_CO2Chair4x4_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 106.25615930672438,
+      "energy_rmse_mev_per_atom": 106.25615930672438,
+      "force_rmse_mev": 472.0913837095782
+    },
+    "solventbulk": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -9.860014569852638,
+      "energy_rmse_mev_per_atom": 9.860014569852638,
+      "force_rmse_mev": 84.45496620917224
+    },
+    "ptodisnaf_optimised_structure": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -13.604888465721388,
+      "energy_rmse_mev_per_atom": 13.604888465721388,
+      "force_rmse_mev": 133.30839521458785
+    },
+    "inputoh2_optimised_structure": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 2.6197141983175243,
+      "energy_rmse_mev_per_atom": 2.6197141983175243,
+      "force_rmse_mev": 75.44197453897384
+    },
+    "fps_pt_diss_naf_framesv1_recalibrated": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -4.75572237041888,
+      "energy_rmse_mev_per_atom": 4.75572237041888,
+      "force_rmse_mev": 92.19733483146803
+    },
+    "finoh20.75_optimised_structure": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -4.242151604330502,
+      "energy_rmse_mev_per_atom": 4.242151604330502,
+      "force_rmse_mev": 86.50525536856426
+    },
+    "DissolvedOH_Nafion": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -11.299083989172232,
+      "energy_rmse_mev_per_atom": 11.299083989172232,
+      "force_rmse_mev": 99.66216499921173
+    },
+    "fps_naf_naf_contaminants": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -2.697817365458377,
+      "energy_rmse_mev_per_atom": 2.697817365458377,
+      "force_rmse_mev": 110.02978314494263
+    },
+    "bulk_water_Pt": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -9.083544463294402,
+      "energy_rmse_mev_per_atom": 9.083544463294402,
+      "force_rmse_mev": 90.70357986869543
+    },
+    "Naf0.75PtOH2": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -9.759089568547097,
+      "energy_rmse_mev_per_atom": 9.759089568547097,
+      "force_rmse_mev": 112.57863439258232
+    },
+    "Naf0.75PtO": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -7.6750830266973935,
+      "energy_rmse_mev_per_atom": 7.6750830266973935,
+      "force_rmse_mev": 97.54512791066192
+    },
+    "Naf0.375PtOH2": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -2.668724509362619,
+      "energy_rmse_mev_per_atom": 2.668724509362619,
+      "force_rmse_mev": 113.51825260423054
+    },
+    "FORCED_Wet0.375PtO2_neb_img00": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 0.9277267630523056,
+      "energy_rmse_mev_per_atom": 0.9277267630523056,
+      "force_rmse_mev": 69.5820828415525
+    },
+    "FORCED_Naf1.0PtO_neb_img03": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -12.22896757599301,
+      "energy_rmse_mev_per_atom": 12.22896757599301,
+      "force_rmse_mev": 127.795373432906
+    },
+    "FORCED_Naf0.75PtOH_neb_img00": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -7.060437072709647,
+      "energy_rmse_mev_per_atom": 7.060437072709647,
+      "force_rmse_mev": 94.55391176289659
+    },
+    "FORCED_Close0.25PtO_neb_img00": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 0.8033286508180026,
+      "energy_rmse_mev_per_atom": 0.8033286508180026,
+      "force_rmse_mev": 88.30308973104877
+    },
+    "full_para_12_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 2.408321694190363,
+      "energy_rmse_mev_per_atom": 2.408321694190363,
+      "force_rmse_mev": 125.88799605040974
+    },
+    "full_anti_9_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 4.7452770472204975,
+      "energy_rmse_mev_per_atom": 4.7452770472204975,
+      "force_rmse_mev": 123.99408933694497
+    },
+    "PtSWoxo_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 88.44378254178764,
+      "energy_rmse_mev_per_atom": 88.44378254178764,
+      "force_rmse_mev": 376.99368320092185
+    },
+    "PtOso3sol_chair_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 12.561595290122796,
+      "energy_rmse_mev_per_atom": 12.561595290122796,
+      "force_rmse_mev": 307.6530887769532
+    },
+    "PtOso3_chair_initial": {
+      "n": 2,
+      "energy_bias_mev_per_atom": 42.393730096307536,
+      "energy_rmse_mev_per_atom": 42.52939422181374,
+      "force_rmse_mev": 427.1694309062833
+    },
+    "full_cross_15_initial": {
+      "n": 2,
+      "energy_bias_mev_per_atom": 0.0581122162657266,
+      "energy_rmse_mev_per_atom": 0.2331222918157736,
+      "force_rmse_mev": 114.00862013888718
+    },
+    "PtGraph10*7_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -14.340137888893878,
+      "energy_rmse_mev_per_atom": 14.340137888893878,
+      "force_rmse_mev": 80.73721967687072
+    },
+    "Graph_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -2.3773628219885268,
+      "energy_rmse_mev_per_atom": 2.3773628219885268,
+      "force_rmse_mev": 88.62989818522064
+    },
+    "PtHemGraph20*10_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 2.3410509043628736,
+      "energy_rmse_mev_per_atom": 2.3410509043628736,
+      "force_rmse_mev": 81.74166549308642
+    },
+    "A8_CSIRO_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": 47.02393811354,
+      "energy_rmse_mev_per_atom": 47.02393811354,
+      "force_rmse_mev": 300.76698044610214
+    },
+    "5PtGraph_sol_initial": {
+      "n": 1,
+      "energy_bias_mev_per_atom": -15.735393884256155,
+      "energy_rmse_mev_per_atom": 15.735393884256155,
+      "force_rmse_mev": 86.85898540246822
+    },
+    "Naf-Naf_Pt": {
+      "n": 87,
+      "energy_bias_mev_per_atom": -11.716669012828177,
+      "energy_rmse_mev_per_atom": 11.773952482091024,
+      "force_rmse_mev": 123.0555508574712
+    },
+    "Pt_water": {
+      "n": 42,
+      "energy_bias_mev_per_atom": -5.581236937936345,
+      "energy_rmse_mev_per_atom": 9.553592455503374,
+      "force_rmse_mev": 145.5550034787104
+    },
+    "Pt_Nafion": {
+      "n": 184,
+      "energy_bias_mev_per_atom": -6.558788503964949,
+      "energy_rmse_mev_per_atom": 10.088501125615657,
+      "force_rmse_mev": 146.44874229597036
+    },
+    "Bulk_wet_Pt": {
+      "n": 25,
+      "energy_bias_mev_per_atom": -3.427090395916821,
+      "energy_rmse_mev_per_atom": 3.79725053715004,
+      "force_rmse_mev": 111.98468064405303
+    },
+    "Naf-Naf": {
+      "n": 48,
+      "energy_bias_mev_per_atom": -9.826868820270581,
+      "energy_rmse_mev_per_atom": 10.002149800995035,
+      "force_rmse_mev": 129.66223485617144
+    },
+    "Pt_diss_Wet": {
+      "n": 7,
+      "energy_bias_mev_per_atom": 2.6953824420843375,
+      "energy_rmse_mev_per_atom": 5.009254082195737,
+      "force_rmse_mev": 76.12013528661113
+    }
+  }
+}
