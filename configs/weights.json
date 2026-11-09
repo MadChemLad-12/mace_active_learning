@@ -1,4 +1,9 @@
 {
+  "2pttop": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.1
+  },
   "2pttopoh": {
     "count": 1,
     "current_weight": null,
@@ -18,6 +23,11 @@
     "count": 2,
     "current_weight": null,
     "MACE_weight": 1.3
+  },
+  "A8_CSIRO_initial": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.5
   },
   "Chair4x4sat_sol_initial": {
     "count": 4,
@@ -649,6 +659,11 @@
     "current_weight": null,
     "MACE_weight": 1.0
   },
+  "FORCED_Wet0.375PtO2_neb_img06": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 1.0
+  },
   "FORCED_Wet0.375PtOH2_neb_img00": {
     "count": 1,
     "current_weight": null,
@@ -890,7 +905,7 @@
     "MACE_weight": 1.2
   },
   "Pt4_SW_CO2Chair4x4_initial": {
-    "count": 5,
+    "count": 2,
     "current_weight": null,
     "MACE_weight": 1.5
   },
@@ -910,7 +925,7 @@
     "MACE_weight": null
   },
   "PtOso3_chair_initial": {
-    "count": 16,
+    "count": 8,
     "current_weight": null,
     "MACE_weight": 1.3
   },
@@ -920,7 +935,7 @@
     "MACE_weight": 1.5
   },
   "PtSWoxo_initial": {
-    "count": 10,
+    "count": 6,
     "current_weight": null,
     "MACE_weight": 1.3
   },
@@ -1080,7 +1095,7 @@
     "MACE_weight": 1.1
   },
   "fps_bulk_wet_pt_dissolved_wet_framesv1": {
-    "count": 7,
+    "count": 8,
     "current_weight": null,
     "MACE_weight": null
   },
@@ -1175,7 +1190,7 @@
     "MACE_weight": 1.1
   },
   "mptrj_pt": {
-    "count": 9,
+    "count": 7,
     "current_weight": null,
     "MACE_weight": 0.5
   },
@@ -1189,8 +1204,18 @@
     "current_weight": null,
     "MACE_weight": null
   },
+  "nafptparticle": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.2
+  },
+  "nafptparticle_solvated": {
+    "count": 1,
+    "current_weight": null,
+    "MACE_weight": 0.2
+  },
   "oc25_pt": {
-    "count": 29,
+    "count": 31,
     "current_weight": null,
     "MACE_weight": 0.7
   },
@@ -1319,16 +1344,11 @@
     "current_weight": null,
     "MACE_weight": 1.1
   },
-  "reico_random": {
-    "count": 36,
-    "current_weight": null,
-    "MACE_weight": 0.5
-  },
   "simple_anti_0_initial": {
     "count": 2,
     "current_weight": null,
     "MACE_weight": 1.2
-    },
+  },
   "simple_anti_12_initial": {
     "count": 3,
     "current_weight": null,

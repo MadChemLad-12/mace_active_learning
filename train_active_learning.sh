@@ -163,6 +163,7 @@ FORCES_WEIGHT="${FORCES_WEIGHT:-100}"
 ENERGY_WEIGHT="${ENERGY_WEIGHT:-1}"
 STRESS_WEIGHT="${STRESS_WEIGHT:-1}"
 # SWA weights
+SWA="${SWA:-TRUE}"
 SWA_LR="${SWA_LR:-0.0005}"
 FORCES_SWA="${FORCES_SWA:-1000}"
 ENERGY_SWA="${ENERGY_SWA:-10}"
@@ -197,6 +198,14 @@ print(e0)
 echo "ATOMIC_NUMBERS=$ATOMIC_NUMBERS"
 echo "E0_VALUES=$E0_VALUES"
 echo
+
+# Turn on swa?
+label_swa()
+    if $SWA:
+        return --swa
+    else
+        return 
+
 
 # Path to parity plot script
 PARITY_SCRIPT="${MACE_PATH}/analysis/plot_parity.py"
@@ -260,7 +269,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 section "Begin Training"
 
 RESTART_FLAG=""
-if [[ "$RESTART" == "true" ]]; then
+if [[ "$RESTART" == "label_swatrue" ]]; then
     RESTART_FLAG="--restart_latest"
 fi
 
@@ -268,7 +277,8 @@ mace_run_train \
     --name="$MODEL_NAME" \
     --foundation_model="$FOUNDATION" \
     --train_file="$TRAINING_PATH" \
-    --valid_file="$EVAL_CONFIGS" \
+    --valid_fraction="$VALIDATION_FRACTION" \
+    --test_file="$EVAL_CONFIGS" \
     --default_dtype="$FLOAT_TYPE" \
     --config_type_weights "$CONFIG_TYPE_WEIGHTS" \
     --energy_key="REF_energy" \
@@ -288,7 +298,7 @@ mace_run_train \
     --scheduler="ReduceLROnPlateau" \
     --max_num_epochs="$MAX_EPOCHS" \
     --patience="$PATIENCE" \
-    --swa \
+    label_swa() \
     --start_swa "$SWA_START" \
     --swa_lr="$SWA_LR" \
     --swa_energy_weight="$ENERGY_SWA" \
