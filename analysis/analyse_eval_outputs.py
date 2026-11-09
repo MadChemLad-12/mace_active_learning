@@ -61,7 +61,7 @@ def parse_args():
     p.add_argument("--head", type=str, default=None, help="Head name for multihead models (e.g. Default)")
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--default_dtype", type=str, default="float64")
-    p.add_argument("--batch_size", type=int, default=4)
+    p.add_argument("--batch_size", type=int, default=2)
     p.add_argument("--info_prefix", type=str, default="MACE_", help="Prefix of predicted keys in the eval file")
     p.add_argument("--ref_energy_key", type=str, default="REF_energy")
     p.add_argument("--ref_forces_key", type=str, default="REF_forces")
@@ -347,7 +347,7 @@ def main():
     for i, atoms in enumerate(frames):
         rows.append({
             "index": i,
-            "config_type": atoms.info.get("config_type", atoms.get_chemical_formula()),
+            "system_type": atoms.info.get("system_type", atoms.get_chemical_formula()),
             "n_atoms": int(n_atoms[i]),
             "energy_error_mev_per_atom": float((mace_e_pa[i] - dft_e_pa[i]) * 1000),
             "force_rmse_mev": float(np.sqrt(np.mean((mace_f[i] - dft_f[i]) ** 2)) * 1000),
@@ -370,10 +370,10 @@ def main():
         for rank, item in enumerate(worst_force[:args.n_worst], 1):
             w.writerow({**item, "ranking_type": "Worst Force Errors", "rank": rank})
 
-    # ---- per config_type breakdown ----
+    # ---- per system_type breakdown ----
     groups = defaultdict(list)
     for r in rows:
-        groups[r["config_type"]].append(r)
+        groups[r["system_type"]].append(r)
     by_type = {}
     for ct, rs in groups.items():
         e = np.array([r["energy_error_mev_per_atom"] for r in rs])
@@ -407,7 +407,7 @@ def main():
         "forces": {**f_stats, "units": "meV/A (MAE, RMSE)", "threshold_rmse": args.force_threshold,
                    "pass": bool(force_pass)},
         "atomization_energy": ae_stats,
-        "usable": usable, "by_config_type": by_type,
+        "usable": usable, "by_system_type": by_type,
     }
     with open(os.path.join(args.outdir, f"summary_{tag}.json"), "w") as fh:
         json.dump(summary, fh, indent=2)
@@ -423,7 +423,7 @@ def main():
           f"R2 {f_stats['r2']:.4f}  ({'PASS' if force_pass else 'FAIL'} <= {args.force_threshold})")
     print(f"Usable: {usable}")
     if len(by_type) > 1:
-        print("\nPer config_type:")
+        print("\nPer system_type:")
         for ct, s in sorted(by_type.items(), key=lambda kv: -kv[1]["force_rmse_mev"]):
             print(f"  {ct:30s} n={s['n']:4d}  E bias {s['energy_bias_mev_per_atom']:+8.2f}  "
                   f"RMSE {s['energy_rmse_mev_per_atom']:7.2f} meV/atom  "
