@@ -11,8 +11,8 @@ from dataclasses import dataclass
 class CheckResidualConfig:
     round: int = 9
     apply_d3: bool = False          # apply D3 correction to MACE energies
-    max_force_ref: float = 15.5     # eV/Å, max force for a structure to be valid # 45 was the old value and 15 did kind well
-    max_rmse: float = 600.0       # meV/Å, max RMSE force for a structure to be valid
+    max_force_ref: float = 13.0     # eV/Å, max force for a structure to be valid # 45 was the old value and 15 did kind well
+    max_rmse: float = 550.0       # meV/Å, max RMSE force for a structure to be valid
     non_pt_thresh: float = 2.3     # Å, z-height threshold for non-Pt atoms entering slab
     max_count: int = 800           # max atom count allowed in a system
     
@@ -32,6 +32,8 @@ class CheckResidualConfig:
         
         if "reico_random" in ct:
             coh_lo, coh_hi = -5.0, 0.0
+        elif "oc25" in ct or "mptrj_pt" in ct or "pt3o4" in ct or "pt3o4cell_optimised_structure" in ct:
+            coh_lo, coh_hi = -6.5, 0.5
         elif "dry" in ct:
             coh_lo, coh_hi = -7.1, 0.0
         elif pt_count > 3:                                          # Pt slab
@@ -39,9 +41,9 @@ class CheckResidualConfig:
         elif pt_count > 0:                                        # dissolved Pt
             coh_lo, coh_hi = -8.0, 0.0
         elif "P" in symbols_set or "N" in symbols_set:
-            coh_lo, coh_hi = -6.5, 0.5
+            coh_lo, coh_hi = -8.5, 0.0
         elif any(s in symbols_set for s in ("F", "S", "C")):       # Nafion-containing
-            coh_lo, coh_hi = -6.5, 0.5
+            coh_lo, coh_hi = -8.5, 0.5
         elif symbols_set <= {"H", "O"}:                            # bulk water
             coh_lo, coh_hi = -5.0, 0.5
         else:                                                       # fallback
@@ -59,11 +61,13 @@ class CheckResidualConfig:
         ct = (config_type or "").lower()  # case insensitive
         
         if   "reico_random" in ct:                 # Reico samples
-            rmse_thresh = 300
+            rmse_thresh = 400
+        elif "oc25" in ct or "mptrj_pt" in ct or "pt3o4" in ct or "pt3o4cell_optimised_structure" in ct:
+            rmse_thresh = 550
         elif   "dry" in ct:
             rmse_thresh = 400
         elif   "Pt" in symbols_set and pt_count > 3:           # Pt slab was 400
-            rmse_thresh = 550
+            rmse_thresh = 600
         elif "P" in symbols_set or "N" in symbols_set:       # was 400
             rmse_thresh = 550
         elif set(symbols_set) <= {"H", "O"}:                      # bulk water

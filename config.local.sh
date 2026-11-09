@@ -1,7 +1,7 @@
 #!/bin/bash
 export MACE_FOUNDATION_MODEL="/home/h.jack/MACE_train/mace_active_learning/mace-mpa-0-medium.model"
 export MACE_FINETUNED_MODEL="/home/h.jack/MACE_train/mace_active_learning/mace_V9_active_learning.model"
-export MACE_DEFAULT_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/configsV9.csv"
+export MACE_DEFAULT_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/configs.csv"
 export MACE_NEB_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/configs.csv"
 export MACE_NEB_OUTPUT="/home/h.jack/MACE_train/mace_active_learning/neb_comparison"
 export MACE_PATH="/home/h.jack/MACE_train/mace_active_learning/"
