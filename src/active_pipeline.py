@@ -1869,7 +1869,8 @@ def create_random_box(elements, n_atoms, config: ActivePipelineConfig, max_attem
     edge = (n_atoms * vol_per_atom) ** (1 / 3)
     cell = [edge, edge, edge]
     chosen = list(np.random.choice(elements, size=n_atoms))
-
+    print(f"Attempting REICO box with {elements}. Using atomic volume of {vol_per_atom}")
+    print(f"edge distance of {min_dist_scale}, in a cell of {cell} dimensions.")
     atoms = Atoms(cell=cell, pbc=True)
     for el in chosen:
         placed = False
