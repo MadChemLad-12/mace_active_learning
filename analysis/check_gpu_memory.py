@@ -3,10 +3,12 @@ from mace.calculators import MACECalculator
 from ase.io import read
 import numpy as np
 import os
-from configs.constants import CLEAN_TRAIN
+from configs.constants import CLEAN_TRAIN, FOUNDATION_MODEL_PATH
 from configs.round_configs.schema import ActivePipelineConfig
+from helpers.imp_helper import imp_highest_config
+active_pipeline = imp_highest_config("active_pipeline")
 
-MODEL_PATH = os.environ.get("MACE_FOUNDATION_MODEL") or os.environ.get("MACE_FINETUNED_MODEL")
+MODEL_PATH = FOUNDATION_MODEL_PATH
 POOL_FILE  = CLEAN_TRAIN
 
 # Load pool and sort by volume largest first
@@ -16,7 +18,8 @@ pool_sorted = sorted(
     key=len, 
     reverse=True
 )
-config = ActivePipelineConfig()
+config = active_pipeline.ActivePipelineConfig()
+# config = ActivePipelineConfig()
 calc = MACECalculator(model_paths=MODEL_PATH, device=config.device, default_dtype=config.dtype)
 
 print(f"{'Volume (Å³)':<15} {'N atoms':<10} {'Index' :<10} {'Status':<10} ")

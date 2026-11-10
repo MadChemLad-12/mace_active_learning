@@ -11,7 +11,6 @@ Usage:
     python check_max_forces.py training_clean.xyz --key REF_forces
     python check_max_forces.py training_clean.xyz --key forces --top 30 --threshold 5.0
 
-Requires: ase  (pip install ase --break-system-packages)
 """
 
 import argparse

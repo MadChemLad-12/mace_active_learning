@@ -53,25 +53,15 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from configs.round_configs.schema import ActivePipelineConfig
+# from configs.round_configs.schema import ActivePipelineConfig
+from helpers.imp_helper import imp_highest_config
+active_pipeline = imp_highest_config("active_pipeline")
+ActivePipelineConfig = active_pipeline.ActivePipelineConfig()
 from configs.constants import HELD_OUT, E0_JSON, CLEAN_TRAIN, BAD_TRAIN, MASTER_TRAIN
 from src.patches import apply_dftd3_cell_patch
 apply_dftd3_cell_patch()
 
-
-ROUND = ActivePipelineConfig.round
-def load_residual_config(ROUND: int) -> ActivePipelineConfig:
-    if ROUND != int(ROUND):
-        raise ValueError(
-            f"Round '{ROUND}' is not supported. Please use round=1 for the initial check."
-        )
-
-    config_module = importlib.import_module(
-        f"configs.round_configs.round{ROUND}_active_pipeline"
-    )
-    return config_module.CONFIG, config_module.CONFIG.apply_d3, config_module.get_coh_bounds
-
-CONFIG, APPLY_D3, get_coh_bounds = load_residual_config(ROUND)
+CONFIG, APPLY_D3, get_coh_bounds = active_pipeline.ActivePipelineConfig.apply_d3, active_pipeline.ActivePipelineConfig.get_coh_bounds
 
 # ==============================================================================
 # Configuration

@@ -143,8 +143,14 @@ def compute_reaction_coordinate(atoms_list: list) -> np.ndarray:
 # ─────────────────────────────────────────────
 # 2. MACE EVALUATION
 # ─────────────────────────────────────────────
-from configs.round_configs.schema import ActivePipelineConfig
-config = ActivePipelineConfig()
+from helpers.imp_helper import imp_highest_config
+try:
+    config = imp_highest_config("active_pipeline")
+    confg = config.ActivePipelineConfig
+except:
+    print("The new imp_highest_config solution did not work")
+#from configs.round_configs.schema import ActivePipelineConfig
+#config = ActivePipelineConfig()
 def evaluate_mace(atoms_list: list, model_path: str,
                   device: str = config.device) -> dict:
     """
