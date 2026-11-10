@@ -20,8 +20,8 @@ if not LIBDIR:
     )
 
 # MACE MODEL PATHS
-FOUNDATION_MODEL_PATH="/home/h.jack/MACE_train/mace_active_learning/mace-mpa-0-medium.model"
-FINETUNED_MODEL_PATH="/home/h.jack/MACE_train/mace_active_learning/mace_V8_active_learning_stagetwo.model"
+FOUNDATION_MODEL_PATH=os.getenv("MACE_FOUNDATION_MODEL")
+FINETUNED_MODEL_PATH=os.getenv("MACE_FINETUNED_MODEL")
 
 # --- Atomic number mapping ---
 Z_MAP = {"H": 1, "C": 6, "O": 8, "F": 9, "S": 16, "Pt": 78}

@@ -39,10 +39,10 @@ class ActivePipelineConfig:
     # --- REICO (random imaginary-chemical box) sampling ---
     reico_sampling: bool = True
     reico_num: int = 10               # random boxes generated per round
-    reico_min_atoms: int = 20
-    reico_max_atoms: int = 60
-    reico_vol_per_atom: float = 7.0   # Å³/atom, condensed-phase packing density
-    reico_min_dist_scale: float = 1.2   # scales (r_cov_a + r_cov_b) per-pair min distance
+    reico_min_atoms: int = 5
+    reico_max_atoms: int = 50
+    reico_vol_per_atom: float = 12   # Å³/atom, condensed-phase packing density
+    reico_min_dist_scale: float = 1.3   # scales (r_cov_a + r_cov_b) per-pair min distance
 
     # --- Committee_models ---
     use_committee: bool = True

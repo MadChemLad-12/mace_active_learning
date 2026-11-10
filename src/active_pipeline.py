@@ -58,6 +58,10 @@ root_dir = Path(__file__).resolve().parent.parent
 if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
 from configs.constants import LIBDIR, Z_MAP, METALS, KIND_PARAMS, DEFAULT_CELLS, E0_CELL_SIZE, E0_JSON, MASTER_TRAIN, FINETUNED_MODEL_PATH, FOUNDATION_MODEL_PATH
+
+import helpers.imp_helper
+active_pipeline = imp_helper("active_pipeline")
+ActivePipelineConfig = active_pipeline.ActivePipelineConfig
 from configs.round_configs.schema import ActivePipelineConfig, get_coh_bounds
 
 # ============================================================
