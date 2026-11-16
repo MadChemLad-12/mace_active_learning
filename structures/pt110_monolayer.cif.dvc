@@ -1,0 +1,5 @@
+outs:
+- md5: 222c9aa91cedb11b9607807caed476bb
+  size: 36376
+  hash: md5
+  path: pt110_monolayer.cif

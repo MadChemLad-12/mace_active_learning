@@ -1,0 +1,5 @@
+outs:
+- md5: e33625cd814d1ea301c01101eceb38c6
+  size: 24880
+  hash: md5
+  path: pt111_water_packmol.cif

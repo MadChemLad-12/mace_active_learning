@@ -1,0 +1,5 @@
+outs:
+- md5: 12b92e611fe2355a700712c106b68639
+  size: 3895748
+  hash: md5
+  path: mp_finetuning-mace_V8_active_learning_run-123.xyz

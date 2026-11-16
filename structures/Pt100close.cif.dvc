@@ -1,0 +1,5 @@
+outs:
+- md5: 0b4467a86b02745ff4a318d8e55c018f
+  size: 18480
+  hash: md5
+  path: Pt100close.cif

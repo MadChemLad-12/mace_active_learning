@@ -1,0 +1,5 @@
+outs:
+- md5: 5993904b9bc41b1007498d08a338e6fc
+  size: 6425
+  hash: md5
+  path: pt111_water_monolayer.cif

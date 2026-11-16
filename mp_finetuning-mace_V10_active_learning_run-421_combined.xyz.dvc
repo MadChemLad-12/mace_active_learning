@@ -1,0 +1,5 @@
+outs:
+- md5: c945ab66636ae6178d5fb5ddf4787bd0
+  size: 4142531
+  hash: md5
+  path: mp_finetuning-mace_V10_active_learning_run-421_combined.xyz
