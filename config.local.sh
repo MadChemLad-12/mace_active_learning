@@ -1,11 +1,11 @@
 #!/bin/bash
 export MACE_FOUNDATION_MODEL="/home/h.jack/MACE_train/mace_active_learning/mace-mpa-0-medium.model"
-export MACE_FINETUNED_MODEL="/home/h.jack/MACE_train/mace_active_learning/mace_V9_active_learning.model"
+export MACE_FINETUNED_MODEL="/home/h.jack/MACE_train/mace_active_learning/mace_V11_active_learning.model"
 export MACE_DEFAULT_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/configs.csv"
 export MACE_NEB_CSV="/home/h.jack/MACE_train/mace_active_learning/configs/configs.csv"
 export MACE_NEB_OUTPUT="/home/h.jack/MACE_train/mace_active_learning/neb_comparison"
 export MACE_PATH="/home/h.jack/MACE_train/mace_active_learning/"
-export MACE_TRAINING_PATH="/home/h.jack/MACE_train/mace_active_learning/training_clean_weightV9.6.xyz"
+export MACE_TRAINING_PATH="/home/h.jack/MACE_train/mace_active_learning/training_clean_weightV11.xyz"
 export EVAL_CONFIGS="/home/h.jack/MACE_train/mace_active_learning/fps_validate_frames_corrected.xyz"
 export CP2K_LIBDIR="/home/h.jack/MACE_train/mace_active_learning/data/"
 
@@ -42,9 +42,9 @@ export FORCES_WEIGHT=100
 export ENERGY_WEIGHT=5
 export STRESS_WEIGHT=0
 # SWA weights
-# I think energy 10 and forces 100 is better for swa
-export SWA=False
-export SWA_LR=0.0001
+# I think energy 5 and forces 100 is better for swa
+export SWA=false
+export SWA_LR=0.0005
 export FORCES_SWA=100
-export ENERGY_SWA=10
+export ENERGY_SWA=5
 export STRESS_SWA=0

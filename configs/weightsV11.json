@@ -832,72 +832,72 @@
   "Pt100Naf_vac": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt100Naf_vac_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt100close": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt100close_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt100close_vac": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt100close_vac_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt110close_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt110close_vac_oxo_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt110naf_vac_oxo_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt110water_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt211close": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt211close_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt211close_oxo_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt211close_oxo_vac": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "Pt4_Chair4x4_initial": {
     "count": 4,
@@ -922,7 +922,7 @@
   "PtNafSO3product_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": 1.5
+    "MACE_weight": 1.7
   },
   "PtNaf_initial": {
     "count": 1,
@@ -932,7 +932,7 @@
   "PtOso3_chair_initial": {
     "count": 13,
     "current_weight": null,
-    "MACE_weight": 1.3
+    "MACE_weight": 1.7
   },
   "PtOso3sol_chair_initial": {
     "count": 17,
@@ -962,7 +962,7 @@
   "Ptcluster_Chair_initial": {
     "count": 2,
     "current_weight": null,
-    "MACE_weight": 1.5
+    "MACE_weight": 1.7
   },
   "Ptparticle_oxi_so3_chari_initial": {
     "count": 9,
@@ -1207,47 +1207,47 @@
   "pt100_monolayer_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "pt10vac0_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "pt10vac1_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight":  1.5
+    "MACE_weight":  2.0
   },
   "pt10vac2_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight":  1.5
+    "MACE_weight":  2.0
   },
   "pt110_monolayer_initial": {
     "count": 1,
     "current_weight": 1.0,
-    "MACE_weight": 1.5
+    "MACE_weight": 2.0
   },
   "pt4vac1_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight":  1.5
+    "MACE_weight":  2.0
   },
   "pt4vac2_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight":  1.5
+    "MACE_weight":  2.0
   },
   "pt4vac4_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight":  1.5
+    "MACE_weight":  2.0
   },
   "pt6vac0_initial": {
     "count": 1,
     "current_weight": null,
-    "MACE_weight":  1.5
+    "MACE_weight":  2.0
   },
   "pt6vac4_initial": {
     "count": 1,
