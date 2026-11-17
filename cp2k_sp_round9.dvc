@@ -1,5 +1,6 @@
 outs:
-- md5: e4979ff5e89c3315d271b2f100926c7d.dir
-  nfiles: 309
+- md5: ef88be253c97b4cfae9907c0f5482abe.dir
+  nfiles: 29
   hash: md5
   path: cp2k_sp_round9
+  size: 232547
